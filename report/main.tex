@@ -1,0 +1,110 @@
+% CSC-44102 Assessment 1 report.
+%
+% Black and white only: no colour packages; links are not coloured.
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[british]{babel}  % British spelling and date format
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{lmodern}
+\usepackage{graphicx}       % \includegraphics for screenshots
+\usepackage{booktabs}       % clean black-and-white tables
+\usepackage{listings}       % code excerpts, monochrome (set-up below)
+\usepackage{csquotes}
+
+% Referencing: author-year style.
+% useprefix keeps name prefixes: "van Rossum", not "Rossum".
+\usepackage[backend=biber,style=authoryear,useprefix=true]{biblatex}
+\addbibresource{references.bib}
+
+\usepackage[hidelinks]{hyperref}  % load last; hidelinks keeps links black
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  frame=single,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  numbers=left,
+  numberstyle=\tiny,
+  showstringspaces=false
+}
+
+\begin{document}
+
+% Front matter numbered i, ii, ...; the report itself from 1. Without this the
+% title page and the first section are both "page 1", which breaks PDF links.
+\pagenumbering{roman}
+\hypersetup{pageanchor=false}  % the title page gets no PDF page anchor
+
+\begin{titlepage}
+  \centering
+  {\Large CSC-44102 Foundations of Programming and Software Engineering\par}
+  \vspace{1em}
+  {\Large Assessment 1\par}
+  \vspace{2em}
+  {\LARGE [Report title]\par}
+  \vfill
+  [Full name]\par
+  [Student number]\par
+  \vspace{1em}
+  Word count: [number]\par
+  \vspace{1em}
+  [Submission date]\par
+\end{titlepage}
+\hypersetup{pageanchor=true}
+
+
+\section*{Abstract}
+\addcontentsline{toc}{section}{Abstract}
+[Text]
+
+\clearpage
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+\section{Introduction}
+% The problem, aims and objectives, scope.
+[Text]
+
+\section{Requirements}
+\subsection{Functional requirements}
+[Text]
+\subsection{Non-functional requirements}
+[Text]
+
+\section{Design}
+% Data structures, algorithms, program structure, interface design.
+[Text]
+
+\section{Implementation}
+% Both versions: the text-based application and the GUI application.
+[Text]
+
+\section{Testing}
+% Test plan, test cases, results.
+[Text]
+
+\section{Evaluation}
+% Against the requirements, including limitations and future improvements.
+[Text]
+
+\section{Conclusion}
+[Text]
+
+\section*{GenAI acknowledgement}
+\addcontentsline{toc}{section}{GenAI acknowledgement}
+[Text]
+
+\clearpage
+\printbibliography[heading=bibintoc]
+
+\clearpage
+\appendix
+\section{How to install and run both applications}
+[Text]
+
+\end{document}

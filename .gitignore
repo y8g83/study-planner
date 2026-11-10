@@ -1,0 +1,30 @@
+# Python bytecode.
+__pycache__/
+*.pyc
+
+# LaTeX build output.
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.log
+*.out
+*.run.xml
+*.toc
+
+# Virtual environments.
+.venv/
+venv/
+
+# Editor and operating-system settings.
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Test coverage output.
+.coverage
+htmlcov/
+
+# Build artefacts.
+*.zip
