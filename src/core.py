@@ -528,15 +528,23 @@ class StartResult:
     """The outcome of loading the data file at start-up (FR6 Section 1).
 
     ``planner`` is ``None`` when the stored data is invalid, so a session
-    can never overwrite a file that failed to load.
+    can never overwrite a file that failed to load. ``path`` is the data
+    file that was read.
     """
 
     outcome: str
     planner: object = None
+    path: object = None
 
     @property
     def ok(self):
         return self.outcome == LOADED
+
+    def lines(self):
+        """Return the error lines for a failed start; empty when loaded."""
+        if self.ok:
+            return []
+        return [render_message(INVALID_STORED_DATA, path=self.path)]
 
 
 def start(path=None):
@@ -550,5 +558,5 @@ def start(path=None):
     try:
         tasks, next_id = storage.load(path)
     except storage.InvalidDataError:
-        return StartResult(INVALID_STORED_DATA)
-    return StartResult(LOADED, Planner(path, tasks, next_id))
+        return StartResult(INVALID_STORED_DATA, path=path)
+    return StartResult(LOADED, Planner(path, tasks, next_id), path)
