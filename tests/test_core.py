@@ -611,6 +611,80 @@ class TestFR8Filters(ViewTestCase):
         self.assertStoredUnchanged(planner)
 
 
+class TestFR8SetFilter(ViewTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.planner = self.start_with(fr8_dataset(), 5)
+
+    def test_ac4_invalid_value_names_filter_and_keeps_filters(self):
+        self.planner.set_filter(core.FILTER_PRIORITY, "High")
+        result = self.planner.set_filter(core.FILTER_STATUS, "Done")
+        self.assertEqual(result.outcome, core.INVALID)
+        self.assertEqual(result.lines(), [
+            "Status filter must be one of: Pending, In Progress, "
+            "Completed."])
+        self.assertEqual(self.planner.view, core.ViewState(priority="High"))
+        self.assertEqual(self.planner.set_filter(
+            core.FILTER_PRIORITY, "Urgent").lines(),
+            ["Priority filter must be one of: High, Medium, Low."])
+
+    def test_ac4_invalid_value_keeps_the_same_filter(self):
+        self.planner.set_filter(core.FILTER_STATUS, "Pending")
+        self.planner.set_filter(core.FILTER_STATUS, "Done")
+        self.assertEqual(self.planner.view.status, "Pending")
+
+    def test_ac4_value_trimmed_and_normalised(self):
+        self.assertTrue(self.planner.set_filter(core.FILTER_STATUS,
+                                                "  pending  ").ok)
+        self.assertEqual(self.planner.view.status, "Pending")
+        self.planner.set_filter(core.FILTER_PRIORITY, "hIGH")
+        self.assertEqual(self.planner.view.priority, "High")
+
+    def test_ac1_empty_or_all_clears_status_and_priority(self):
+        for name in (core.FILTER_STATUS, core.FILTER_PRIORITY):
+            for answer in ("", "   ", "All", "all", " ALL "):
+                with self.subTest(name=name, answer=answer):
+                    self.planner.set_filter(name, "Pending" if name ==
+                                            core.FILTER_STATUS else "High")
+                    self.assertTrue(self.planner.set_filter(name,
+                                                            answer).ok)
+                    self.assertIsNone(getattr(self.planner.view, name))
+
+    def test_ac8_subject_cleared_only_by_empty_answer(self):
+        self.planner.set_filter(core.FILTER_SUBJECT, "  All  ")
+        self.assertEqual(self.planner.view.subject, "All")
+        self.planner.set_filter(core.FILTER_SUBJECT, "   ")
+        self.assertIsNone(self.planner.view.subject)
+
+    def test_setting_filters_changes_nothing_stored(self):
+        self.planner.set_filter(core.FILTER_STATUS, "Pending")
+        self.planner.set_filter(core.FILTER_SUBJECT, "Math")
+        self.planner.set_search("x")
+        self.planner.set_sort(core.SORT_SUBJECT)
+        self.assertStoredUnchanged(self.planner)
+
+    def test_filters_line_fixed_order(self):
+        for view, line in (
+                (core.ViewState(), "Filters: none"),
+                (core.ViewState(status="Pending"), "Filters: status=Pending"),
+                (core.ViewState(subject="Maths", priority="Low",
+                                status="Completed"),
+                 "Filters: status=Completed, priority=Low, subject=Maths")):
+            with self.subTest(line=line):
+                self.assertEqual(core.filters_line(view), line)
+
+    def test_view_lines_and_search_setter(self):
+        self.planner.set_search('  say "hi"  ')
+        self.planner.set_sort(core.SORT_DUE_DATE)
+        self.assertEqual(core.view_lines(self.planner.view), [
+            'Search: "say \\"hi\\""', "Filters: none", "Sort: due date"])
+
+    def test_unknown_sort_rejected(self):
+        with self.assertRaises(ValueError):
+            self.planner.set_sort("title")
+
+
 class TestFR9Sort(ViewTestCase):
 
     def sorted_by(self, sort, **filters):

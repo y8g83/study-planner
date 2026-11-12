@@ -6,8 +6,10 @@ both the exact text and the order in which questions are asked.
 """
 
 import json
+import re
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest import mock
 
@@ -67,6 +69,7 @@ ID | Title                          | Due Date   | Priority | Status
 """.splitlines()
 
 
+TODAY = date(2026, 11, 12)
 SAVE_FAILED = core.render_message(core.SAVE_FAILED)
 UNSAVED = core.render_message(core.UNSAVED_INDICATOR)
 
@@ -111,7 +114,8 @@ class CLITestCase(unittest.TestCase):
 
     def run_cli(self, *answers):
         console = FakeConsole(answers)
-        self.status = cli.main(self.path, console.read, console.write)
+        self.status = cli.main(self.path, console.read, console.write,
+                               lambda: TODAY)
         return console
 
     def assertPromptNotShown(self, console, text):
@@ -505,7 +509,7 @@ class TestTaskTable(CLITestCase):
 class TestMenuAndErrors(CLITestCase):
 
     def test_invalid_menu_option(self):
-        console = self.run_cli("9", "", "0")
+        console = self.run_cli("10", "", "0")
         self.assertEqual(console.lines.count(cli.INVALID_OPTION), 2)
         self.assertEqual(self.status, 0)
 
@@ -542,10 +546,416 @@ class TestMenuAndErrors(CLITestCase):
 
     def test_menu_lists_options(self):
         console = self.run_cli("0")
-        self.assertEqual(console.lines[1:8], [
+        self.assertEqual(console.lines[1:12], [
             "Study Planner", "1. View tasks", "2. Add task",
             "3. Edit task", "4. Delete task", "5. Change task status",
-            "0. Exit"])
+            "6. Search tasks", "7. Filter tasks", "8. Sort tasks",
+            "9. Summary", "0. Exit"])
+
+
+# --- FR7-FR10 through the menu -------------------------------------------
+
+def fr7_dataset():
+    return [task(1, title="Revise Algebra", subject="Mathematics"),
+            task(2, title="Essay draft", subject="History",
+                 description="Check sources for the Tudor period"),
+            task(3, title="Lab report", subject="Biology",
+                 description="Include algebra-based calculations")]
+
+
+def fr8_dataset():
+    return [task(1, subject="Mathematics", priority="High"),
+            task(2, subject="History", status="In Progress"),
+            task(3, subject="Biology", priority="High", status="Completed"),
+            task(4, subject="mathematics", priority="Low")]
+
+
+def fr9_dataset():
+    return [task(1, subject="Mathematics", priority="High",
+                 due_date="2026-11-20"),
+            task(2, subject="History", status="In Progress",
+                 due_date="2026-11-10"),
+            task(3, subject="biology", priority="High", status="Completed",
+                 due_date="2026-11-10"),
+            task(4, subject="Mathematics", priority="Low",
+                 due_date="2026-11-05"),
+            task(5, subject="Art", due_date="2026-11-20")]
+
+
+ROW = re.compile(r"(\d+) +\| ")
+NO_MATCH = core.render_message(core.NO_MATCHING_TASKS)
+NO_TASKS = core.render_message(core.NO_TASKS_YET)
+
+# Menu answers for each filter and sort.
+STATUS, PRIORITY, SUBJECT = ("7", "1"), ("7", "2"), ("7", "3")
+SORT = {None: ("8", "0"), core.SORT_DUE_DATE: ("8", "1"),
+        core.SORT_PRIORITY: ("8", "2"), core.SORT_STATUS: ("8", "3"),
+        core.SORT_SUBJECT: ("8", "4")}
+
+
+class ListView:
+    """One list view as shown: its view lines, row IDs and message."""
+
+    def __init__(self, lines, start):
+        self.search, self.filters, self.sort = lines[start:start + 3]
+        self.ids = []
+        self.message = None
+        for line in lines[start + 3:]:
+            if line == "" or line.startswith("Choose an option"):
+                break
+            if line in (NO_MATCH, NO_TASKS):
+                self.message = line
+            match = ROW.match(line)
+            if match:
+                self.ids.append(int(match.group(1)))
+
+
+class ViewCLITestCase(CLITestCase):
+
+    def start_with(self, tasks, next_id):
+        self.write_data(tasks, next_id)
+        self.before = self.path.read_bytes()
+
+    def views(self, console):
+        return [ListView(console.lines, index)
+                for index, line in enumerate(console.lines)
+                if line.startswith("Search: ")]
+
+    def last_view(self, *answers):
+        console = self.run_cli(*answers, "0")
+        return self.views(console)[-1]
+
+    def assertFileUnchanged(self):
+        self.assertEqual(self.path.read_bytes(), self.before)
+
+
+class TestFR7SearchCLI(ViewCLITestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.start_with(fr7_dataset(), 4)
+
+    def test_ac1_and_ac2_search_results(self):
+        for query, expected in (("REVISE", [1]), ("tudor", [2]),
+                                ("BIO", [3]), ("algebra", [1, 3])):
+            with self.subTest(query=query):
+                view = self.last_view("6", query)
+                self.assertEqual(view.ids, expected)
+                self.assertFileUnchanged()
+
+    def test_ac3_no_match_and_empty_list(self):
+        self.assertEqual(self.last_view("6", "physics").message, NO_MATCH)
+        self.start_with([], 1)
+        view = self.last_view("6", "essay")
+        self.assertEqual((view.ids, view.message), ([], NO_TASKS))
+
+    def test_ac4_empty_whitespace_and_trimmed_queries(self):
+        for query, expected, search_line in (
+                ("", [1, 2, 3], "Search: none"),
+                ("   ", [1, 2, 3], "Search: none"),
+                ("  essay draft  ", [2], 'Search: "essay draft"'),
+                ("essay  draft", [], 'Search: "essay  draft"')):
+            with self.subTest(query=query):
+                view = self.last_view("6", query)
+                self.assertEqual(view.ids, expected)
+                self.assertEqual(view.search, search_line)
+        self.assertEqual(view.message, NO_MATCH)
+
+    def test_ac5_search_and_subject_filter(self):
+        for subject, expected in (("", [1, 3]), ("Mathematics", [1]),
+                                  ("Biology", [3])):
+            with self.subTest(subject=subject):
+                view = self.last_view("6", "algebra", *SUBJECT, subject)
+                self.assertEqual(view.ids, expected)
+        view = self.last_view("6", "essay", *SUBJECT, "Mathematics")
+        self.assertEqual(view.message, NO_MATCH)
+        self.assertFileUnchanged()
+
+    def test_ac6_casefold_sharp_s(self):
+        self.start_with(fr7_dataset() + [task(4, title="Straße survey",
+                                              subject="Geography")], 5)
+        self.assertEqual(self.last_view("6", "STRASSE").ids, [4])
+        self.assertFileUnchanged()
+
+    def test_ac7_search_persists_and_resets_on_restart(self):
+        console = self.run_cli(
+            "6", "algebra",
+            "2", "Algebra quiz", "Mathematics", "", "2026-11-20", "", "",
+            "1",
+            "2", "History notes", "Mathematics", "", "2026-11-20", "", "",
+            "1", "6", "", "0")
+        views = self.views(console)
+        self.assertEqual(views[0].search, 'Search: "algebra"')
+        self.assertEqual(views[0].ids, [1, 3])
+        self.assertIn("Task 4 added.", console.lines)
+        self.assertEqual(views[1].ids, [1, 3, 4])
+        self.assertIn("Task 5 added.", console.lines)
+        self.assertEqual(views[2].ids, [1, 3, 4])
+        self.assertEqual(views[3].search, "Search: none")
+        self.assertEqual(views[3].ids, [1, 2, 3, 4, 5])
+        restarted = self.last_view("1")
+        self.assertEqual(restarted.search, "Search: none")
+        self.assertEqual(restarted.ids, [1, 2, 3, 4, 5])
+        self.assertEqual(set(self.saved_data()), {"next_id", "tasks"})
+
+    def test_search_does_not_restrict_typed_ids(self):
+        console = self.run_cli("6", "algebra", "5", "2", "Completed", "0")
+        self.assertIn("Task 2 status changed to Completed.", console.lines)
+
+
+class TestFR8FiltersCLI(ViewCLITestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.start_with(fr8_dataset(), 5)
+
+    def test_ac1_individual_filters_and_clearing(self):
+        console = self.run_cli("1", *STATUS, "Pending", "0")
+        first, status = self.views(console)
+        self.assertEqual((first.ids, first.filters),
+                         ([1, 2, 3, 4], "Filters: none"))
+        self.assertEqual((status.ids, status.filters),
+                         ([1, 4], "Filters: status=Pending"))
+        console = self.run_cli(*PRIORITY, "High", *PRIORITY, "", "0")
+        high, cleared = self.views(console)
+        self.assertEqual((high.ids, high.filters),
+                         ([1, 3], "Filters: priority=High"))
+        self.assertEqual((cleared.ids, cleared.filters),
+                         ([1, 2, 3, 4], "Filters: none"))
+        self.assertFileUnchanged()
+
+    def test_ac1_all_clears_status_and_priority(self):
+        for answer in ("All", "all", "  ALL  "):
+            with self.subTest(answer=answer):
+                view = self.last_view(*STATUS, "Pending", *STATUS, answer)
+                self.assertEqual(view.filters, "Filters: none")
+
+    def test_ac2_subject_matching_and_clearing(self):
+        for subject, expected, line in (
+                ("Mathematics", [1, 4], "subject=Mathematics"),
+                ("  MATHEMATICS  ", [1, 4], "subject=MATHEMATICS"),
+                ("Math", [], "subject=Math"),
+                ("   ", [1, 2, 3, 4], "none")):
+            with self.subTest(subject=subject):
+                view = self.last_view(*SUBJECT, subject)
+                self.assertEqual(view.ids, expected)
+                self.assertEqual(view.filters, f"Filters: {line}")
+                if not expected:
+                    self.assertEqual(view.message, NO_MATCH)
+                self.assertEqual(self.saved_data()["tasks"][3]["subject"],
+                                 "mathematics")
+                self.assertFileUnchanged()
+
+    def test_ac3_filters_combine_with_and(self):
+        view = self.last_view(*STATUS, "Pending", *PRIORITY, "High")
+        self.assertEqual(view.ids, [1])
+        self.assertEqual(view.filters,
+                         "Filters: status=Pending, priority=High")
+        view = self.last_view(*STATUS, "Pending", *PRIORITY, "Low",
+                              *SUBJECT, "Mathematics")
+        self.assertEqual(view.ids, [4])
+        self.assertEqual(view.filters, "Filters: status=Pending, "
+                                       "priority=Low, subject=Mathematics")
+        view = self.last_view(*STATUS, "Completed", *SUBJECT, "History")
+        self.assertEqual(view.message, NO_MATCH)
+        self.assertFileUnchanged()
+
+    def test_ac4_invalid_value_keeps_active_filters(self):
+        console = self.run_cli(*PRIORITY, "High", *STATUS, "Done",
+                               *STATUS, "  pending  ", "0")
+        high, after_error, pending = self.views(console)
+        self.assertEqual((high.ids, high.filters),
+                         ([1, 3], "Filters: priority=High"))
+        self.assertIn("Status filter must be one of: Pending, In Progress, "
+                      "Completed.", console.lines)
+        self.assertEqual((after_error.ids, after_error.filters),
+                         ([1, 3], "Filters: priority=High"))
+        self.assertEqual((pending.ids, pending.filters),
+                         ([1], "Filters: status=Pending, priority=High"))
+        self.assertFileUnchanged()
+
+    def test_ac5_filter_persists_and_resets_on_restart(self):
+        console = self.run_cli(
+            *STATUS, "Pending",
+            "2", "Lab", "Physics", "", "2026-11-20", "Medium", "Pending",
+            "1",
+            "2", "Quiz", "Physics", "", "2026-11-20", "Medium", "Completed",
+            "1", *STATUS, "", "0")
+        views = self.views(console)
+        self.assertEqual([v.ids for v in views], [
+            [1, 4], [1, 4, 5], [1, 4, 5], [1, 2, 3, 4, 5, 6]])
+        self.assertEqual([v.filters for v in views], [
+            "Filters: status=Pending"] * 3 + ["Filters: none"])
+        self.assertIn("Task 5 added.", console.lines)
+        self.assertIn("Task 6 added.", console.lines)
+        restarted = self.last_view("1")
+        self.assertEqual(restarted.filters, "Filters: none")
+        self.assertEqual(restarted.ids, [1, 2, 3, 4, 5, 6])
+        self.assertEqual(set(self.saved_data()), {"next_id", "tasks"})
+
+    def test_ac7_filter_on_empty_list(self):
+        self.start_with([], 5)
+        view = self.last_view(*STATUS, "Pending")
+        self.assertEqual(view.message, NO_TASKS)
+        self.assertEqual(view.filters, "Filters: status=Pending")
+        self.assertFileUnchanged()
+
+    def test_ac8_subject_named_all(self):
+        self.start_with(fr8_dataset() + [task(5, subject="All")], 6)
+        console = self.run_cli(*SUBJECT, "All", *SUBJECT, "", "0")
+        only_all, cleared = self.views(console)
+        self.assertEqual(only_all.ids, [5])
+        self.assertEqual(cleared.ids, [1, 2, 3, 4, 5])
+        self.assertFileUnchanged()
+
+    def test_invalid_filter_choice(self):
+        console = self.run_cli("7", "4", "0")
+        self.assertIn(cli.INVALID_OPTION, console.lines)
+        self.assertEqual(self.views(console), [])
+
+
+class TestFR9SortCLI(ViewCLITestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.start_with(fr9_dataset(), 6)
+
+    def test_ac1_to_ac5_orders_and_labels(self):
+        for sort, expected in ((None, [1, 2, 3, 4, 5]),
+                               (core.SORT_DUE_DATE, [4, 2, 3, 1, 5]),
+                               (core.SORT_PRIORITY, [3, 1, 2, 5, 4]),
+                               (core.SORT_STATUS, [4, 1, 5, 2, 3]),
+                               (core.SORT_SUBJECT, [5, 3, 2, 4, 1])):
+            with self.subTest(sort=sort):
+                view = self.last_view(*SORT[sort])
+                self.assertEqual(view.ids, expected)
+                self.assertEqual(view.sort, f"Sort: {sort or 'none'}")
+                self.assertEqual(
+                    [t["id"] for t in self.saved_data()["tasks"]],
+                    [1, 2, 3, 4, 5])
+                self.assertFileUnchanged()
+
+    def test_ac6_filter_then_sort(self):
+        view = self.last_view(*STATUS, "Pending", *SORT[core.SORT_DUE_DATE])
+        self.assertEqual(view.ids, [4, 1, 5])
+        self.assertFileUnchanged()
+
+    def test_ac9_change_and_clear_the_sort(self):
+        console = self.run_cli(*SORT[core.SORT_PRIORITY],
+                               *SORT[core.SORT_STATUS], *SORT[None], "0")
+        priority, status, cleared = self.views(console)
+        self.assertEqual((status.ids, status.sort),
+                         ([4, 1, 5, 2, 3], "Sort: status"))
+        self.assertEqual((cleared.ids, cleared.sort),
+                         ([1, 2, 3, 4, 5], "Sort: none"))
+
+    def test_ac10_restart_has_no_sort(self):
+        self.run_cli(*SORT[core.SORT_SUBJECT], "0")
+        view = self.last_view("1")
+        self.assertEqual((view.ids, view.sort), ([1, 2, 3, 4, 5],
+                                                 "Sort: none"))
+        self.assertEqual(set(self.saved_data()), {"next_id", "tasks"})
+
+    def test_ac11_sort_kept_after_add(self):
+        console = self.run_cli(*SORT[core.SORT_DUE_DATE],
+                               "2", "New", "History", "", "2026-11-10", "",
+                               "", "1", "0")
+        view = self.views(console)[-1]
+        self.assertEqual(view.ids, [4, 2, 3, 6, 1, 5])
+        self.assertEqual(view.sort, "Sort: due date")
+        self.assertEqual([t["id"] for t in self.saved_data()["tasks"]],
+                         [1, 2, 3, 4, 5, 6])
+
+    def test_invalid_sort_option(self):
+        console = self.run_cli("8", "5", "0")
+        self.assertIn(cli.INVALID_OPTION, console.lines)
+        self.assertEqual(self.views(console), [])
+
+
+class TestFR10SummaryCLI(ViewCLITestCase):
+
+    def summary(self, console):
+        start = console.lines.index(next(
+            line for line in console.lines if line.startswith("Total: ")))
+        return console.lines[start:start + 5]
+
+    def test_ac1_and_ac9_labels_with_fixed_today(self):
+        self.start_with(fr9_dataset(), 6)
+        console = self.run_cli("9", "0")
+        self.assertEqual(self.summary(console), [
+            "Total: 5", "Completed: 1", "Remaining: 4", "Overdue: 2",
+            "Completion: 20.0%"])
+        self.assertFileUnchanged()
+
+    def test_ac3_and_ac9_empty_list(self):
+        self.assertEqual(self.summary(self.run_cli("9", "0")), [
+            "Total: 0", "Completed: 0", "Remaining: 0", "Overdue: 0",
+            "Completion: 0.0%"])
+        self.assertFalse(self.path.exists())
+
+    def test_ac4_half_up_percentage(self):
+        tasks = [task(n) for n in range(1, 17)]
+        tasks[0]["status"] = "Completed"
+        self.start_with(tasks, 17)
+        self.assertIn("Completion: 6.3%", self.run_cli("9", "0").lines)
+
+    def test_ac5_and_ac9_all_completed(self):
+        self.start_with([task(n, status="Completed", due_date="2026-01-01")
+                         for n in (1, 2, 3)], 4)
+        self.assertEqual(self.summary(self.run_cli("9", "0")), [
+            "Total: 3", "Completed: 3", "Remaining: 0", "Overdue: 0",
+            "Completion: 100.0%"])
+
+    def test_ac6_filter_does_not_limit_summary(self):
+        self.start_with(fr9_dataset(), 6)
+        console = self.run_cli(*STATUS, "Pending", "9", "0")
+        self.assertEqual(self.views(console)[0].ids, [1, 4, 5])
+        self.assertIn("Total: 5", console.lines)
+        self.assertIn("Overdue: 2", console.lines)
+
+    def test_ac7_summary_reflects_unsaved_change(self):
+        self.start_with(fr9_dataset(), 6)
+        with failing_save():
+            console = self.run_cli("5", "4", "Completed", "9", "0", "2")
+        self.assertEqual(self.summary(console), [
+            "Total: 5", "Completed: 2", "Remaining: 3", "Overdue: 1",
+            "Completion: 40.0%"])
+        self.assertFileUnchanged()
+
+    def test_summary_uses_the_supplied_date(self):
+        self.start_with(fr9_dataset(), 6)
+        console = FakeConsole(["9", "0"])
+        cli.main(self.path, console.read, console.write,
+                 lambda: date(2026, 11, 10))
+        self.assertIn("Overdue: 1", console.lines)
+
+    def test_ac10_summary_changes_nothing(self):
+        self.start_with(fr9_dataset(), 6)
+        self.run_cli("9", "9", "0")
+        self.assertFileUnchanged()
+
+
+class TestFR11ViewLines(ViewCLITestCase):
+
+    def test_ac1_view_lines_above_table(self):
+        self.start_with(fr7_dataset(), 4)
+        console = self.run_cli("1", "0")
+        start = console.lines.index("Search: none")
+        self.assertEqual(console.lines[start:start + 3],
+                         ["Search: none", "Filters: none", "Sort: none"])
+        self.assertEqual(console.lines[start + 3], DEFAULT_VIEW[0])
+
+    def test_ac4_sort_and_search_then_cleared(self):
+        self.start_with([task(1, due_date="2026-11-30"),
+                         task(2, due_date="2026-11-20"),
+                         task(3, due_date="2026-11-10")], 4)
+        console = self.run_cli(*SORT[core.SORT_DUE_DATE], *SORT[None],
+                               "6", "zzz", "6", "", "0")
+        views = self.views(console)
+        self.assertEqual([v.ids for v in views],
+                         [[3, 2, 1], [1, 2, 3], [], [1, 2, 3]])
+        self.assertEqual(views[2].message, NO_MATCH)
+        self.assertFileUnchanged()
 
 
 if __name__ == "__main__":

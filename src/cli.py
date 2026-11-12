@@ -9,6 +9,7 @@ import logging
 import sys
 import textwrap
 import traceback
+from datetime import date
 
 import core
 
@@ -20,8 +21,19 @@ MENU = (
     ("3", "Edit task"),
     ("4", "Delete task"),
     ("5", "Change task status"),
+    ("6", "Search tasks"),
+    ("7", "Filter tasks"),
+    ("8", "Sort tasks"),
+    ("9", "Summary"),
     ("0", "Exit"),
 )
+
+# Filters offered by the filter menu, and sort options by number.
+FILTER_CHOICES = (("1", core.FILTER_STATUS), ("2", core.FILTER_PRIORITY),
+                  ("3", core.FILTER_SUBJECT))
+SORT_CHOICES = (("0", None),) + tuple(
+    (str(number), sort)
+    for number, sort in enumerate(core.SORT_FIELDS, start=1))
 
 # Fields offered by the edit menu, in the core's field order.
 EDIT_FIELDS = tuple(
@@ -92,16 +104,21 @@ def log_internal_error(exc):
 class StudyPlannerCLI:
     """The menu loop of one session, working on a loaded planner."""
 
-    def __init__(self, planner, read=input, write=print):
+    def __init__(self, planner, read=input, write=print, today=date.today):
         self.planner = planner
         self.read = read
         self.write = write
+        self.today = today
         self.actions = {
             "1": self.view_tasks,
             "2": self.add_task,
             "3": self.edit_task,
             "4": self.delete_task,
             "5": self.change_status,
+            "6": self.search_tasks,
+            "7": self.filter_tasks,
+            "8": self.sort_tasks,
+            "9": self.show_summary,
         }
 
     def show(self, *lines):
@@ -149,6 +166,7 @@ class StudyPlannerCLI:
     # --- Menu actions ------------------------------------------------------
 
     def view_tasks(self):
+        self.show(*core.view_lines(self.planner.view))
         view = self.planner.list_view()
         if view.message:
             self.show_message(view.message)
@@ -234,6 +252,49 @@ class StudyPlannerCLI:
             f"current: {task['status']}): ")
         self.show(*self.planner.change_status(task_id_text, status).lines())
 
+    # --- Search, filters, sort and summary (FR7-FR10) -----------------------
+
+    def search_tasks(self):
+        self.planner.set_search(
+            self.read("Search query (press Enter to clear): "))
+        self.view_tasks()
+
+    def filter_tasks(self):
+        self.write("Filters: " + ", ".join(
+            f"{number} {name.capitalize()}"
+            for number, name in FILTER_CHOICES))
+        name = dict(FILTER_CHOICES).get(
+            self.read("Filter to change: ").strip())
+        if name is None:
+            self.write(INVALID_OPTION)
+            return
+        if name == core.FILTER_SUBJECT:
+            prompt = "Subject filter (press Enter to clear): "
+        else:
+            values = (core.STATUSES if name == core.FILTER_STATUS
+                      else core.PRIORITIES)
+            prompt = (f"{name.capitalize()} filter ({', '.join(values)} "
+                      f"or {core.ALL}; press Enter for {core.ALL}): ")
+        result = self.planner.set_filter(name, self.read(prompt))
+        if not result.ok:
+            self.show(*result.lines())
+        self.view_tasks()
+
+    def sort_tasks(self):
+        self.write("Sort by: " + ", ".join(
+            f"{number} {(sort or 'none').capitalize()}"
+            for number, sort in SORT_CHOICES))
+        choice = self.read("Sort option: ").strip()
+        choices = dict(SORT_CHOICES)
+        if choice not in choices:
+            self.write(INVALID_OPTION)
+            return
+        self.planner.set_sort(choices[choice])
+        self.view_tasks()
+
+    def show_summary(self):
+        self.show(*self.planner.summary(self.today()).lines())
+
     # --- Exit (FR6) ----------------------------------------------------------
 
     def confirm_exit(self):
@@ -260,7 +321,7 @@ class StudyPlannerCLI:
                 self.write(INVALID_OPTION)
 
 
-def main(path=None, read=input, write=print):
+def main(path=None, read=input, write=print, today=date.today):
     """Start a session on the data file at ``path``; return the exit status.
 
     ``path`` defaults to ``~/.study_planner/tasks.json``. When the stored
@@ -276,7 +337,7 @@ def main(path=None, read=input, write=print):
         for line in started.lines():
             write(line)
         return 1
-    return StudyPlannerCLI(started.planner, read, write).run()
+    return StudyPlannerCLI(started.planner, read, write, today).run()
 
 
 if __name__ == "__main__":

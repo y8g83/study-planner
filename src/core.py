@@ -78,6 +78,7 @@ ALL_SAVED = "all_saved"
 NO_TASKS_YET = "no_tasks_yet"
 NO_MATCHING_TASKS = "no_matching_tasks"
 INTERNAL_ERROR = "internal_error"
+INVALID_FILTER = "invalid_filter"
 
 # --- Central message table -------------------------------------------------
 
@@ -106,6 +107,7 @@ MESSAGES = {
     ALL_SAVED: "All changes have been saved.",
     NO_TASKS_YET: "No tasks yet.",
     NO_MATCHING_TASKS: "No tasks match the current search and filters.",
+    INVALID_FILTER: "{filter} filter must be one of: {values}.",
     INTERNAL_ERROR: "An internal application error occurred. "
                     "Please try again.",
 
@@ -509,6 +511,30 @@ def sort_line(view):
     return f"Sort: {view.sort or 'none'}"
 
 
+FILTER_STATUS = "status"
+FILTER_PRIORITY = "priority"
+FILTER_SUBJECT = "subject"
+FILTERS = (FILTER_STATUS, FILTER_PRIORITY, FILTER_SUBJECT)
+ALL = "All"
+
+
+def filters_line(view):
+    """The CLI ``Filters:`` line with every active filter, or ``none``.
+
+    Active filters appear in the fixed order status, priority, subject,
+    for example ``Filters: status=Pending, priority=High``.
+    """
+    active = [f"{name}={getattr(view, name)}" for name in FILTERS
+              if getattr(view, name) is not None]
+    return f"Filters: {', '.join(active) or 'none'}"
+
+
+def view_lines(view):
+    """The ``Search:``, ``Filters:`` and ``Sort:`` lines shown above the
+    CLI task list."""
+    return [search_line(view), filters_line(view), sort_line(view)]
+
+
 # --- Summary (FR10) ----------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -698,6 +724,42 @@ class Planner:
         else:
             message = None
         return ListView(shown, message)
+
+    def set_search(self, query):
+        """Set the session's search query; an empty query clears it."""
+        self.view.search = query.strip()
+
+    def set_filter(self, name, text):
+        """Set or clear one filter from typed text (FR8).
+
+        Status and priority are trimmed and matched case-insensitively
+        against their permitted values; an empty answer or ``All`` clears
+        the filter. An invalid value gives an ``INVALID`` result and leaves
+        every filter unchanged. For the subject, only an answer that is
+        empty after trimming clears the filter; ``All`` is an ordinary
+        subject.
+        """
+        text = text.strip()
+        if name == FILTER_SUBJECT:
+            self.view.subject = text or None
+            return OperationResult(SUCCESS)
+        permitted = {FILTER_STATUS: STATUSES,
+                     FILTER_PRIORITY: PRIORITIES}[name]
+        if not text or text.casefold() == ALL.casefold():
+            setattr(self.view, name, None)
+            return OperationResult(SUCCESS)
+        for canonical in permitted:
+            if text.casefold() == canonical.casefold():
+                setattr(self.view, name, canonical)
+                return OperationResult(SUCCESS)
+        return OperationResult(INVALID, INVALID_FILTER, {
+            "filter": name.capitalize(), "values": ", ".join(permitted)})
+
+    def set_sort(self, sort):
+        """Select a sort field from ``SORT_FIELDS``, or ``None`` to clear."""
+        if sort is not None and sort not in SORT_FIELDS:
+            raise ValueError(f"unknown sort field: {sort!r}")
+        self.view.sort = sort
 
     # --- Summary (FR10) ------------------------------------------------------
 

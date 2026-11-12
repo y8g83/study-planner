@@ -14,8 +14,8 @@ implements business rules itself.
 | Task list view (`src/core.py`) | Implemented and tested |
 | Input validation (`src/core.py`) | Implemented and tested |
 | JSON persistence (`src/storage.py`, coordinated by `src/core.py`) | Implemented and tested |
+| Search, filters, merge sort and summary (`src/core.py`) | Implemented and tested |
 | Text-based interface (`src/cli.py`) | Implemented and tested |
-| Search, filter, sort and progress summary | Planned |
 | Tkinter interface (GUI) | Planned |
 
 ## Implemented features
@@ -34,7 +34,31 @@ implements business rules itself.
   status again changes and saves nothing.
 - A task ID is checked, and the task looked up, before any further question
   is asked.
-- **View:** the task list in stored order, including changes not yet saved.
+- **View:** the task list, including changes not yet saved. Without a
+  search, filter or sort, tasks appear in stored order.
+
+### Search, filters, sort and summary
+
+- **Search:** a task matches when the query appears in its title,
+  description or subject, ignoring letter case (`casefold()`). The query is
+  trimmed; an empty query shows every task.
+- **Filters:** by status, priority and subject, one value each. The subject
+  must match exactly, ignoring letter case and surrounding spaces, so `Math`
+  does not match `Mathematics`. Search and all active filters combine with
+  AND.
+- **Sort:** by due date, priority, status or subject (case-insensitive);
+  priority, status and subject use the due date as the second key, and
+  equal tasks keep their stored order. Sorting uses the application's own
+  stable merge sort, which returns a new list and never reorders the stored
+  tasks.
+- Search, filters and sort last for the current session only; they are
+  never saved and reset when the application restarts.
+- If there are no tasks at all, `No tasks yet.` is shown; if tasks exist but
+  none match, `No tasks match the current search and filters.`
+- **Summary:** `Total`, `Completed`, `Remaining`, `Overdue` and `Completion`
+  for every task in memory, regardless of search, filters and sort. A task
+  is overdue when its due date is before today and it is not completed. The
+  completion percentage is rounded half-up to one decimal place.
 
 ### Input validation
 
@@ -122,6 +146,10 @@ The main menu offers:
 3. Edit task
 4. Delete task
 5. Change task status
+6. Search tasks
+7. Filter tasks
+8. Sort tasks
+9. Summary
 0. Exit
 ```
 
@@ -129,6 +157,13 @@ The main menu offers:
   and Status; the subject and any description appear beneath each task.
 - To edit a task, enter its ID, then the numbers of the fields to change,
   separated by commas (for example `1,5` for title and priority).
+- The `Search:`, `Filters:` and `Sort:` lines above the list show the
+  current view settings, for example `Filters: status=Pending, priority=High`.
+  An empty search query clears the search.
+- To filter, choose the status, priority or subject filter, then enter a
+  value. For status and priority, an empty answer or `All` clears the
+  filter; for the subject, only an empty answer clears it, so a subject
+  named `All` can still be filtered.
 - While changes are unsaved, the menu shows `Unsaved changes`. Exiting then
   offers **Retry saving**, **Exit without saving** and **Cancel exit**.
 - If the data file is invalid, the application shows an error and does not
@@ -154,7 +189,7 @@ and never read or write the real data file.
 |---|---|
 | `tests/test_validation.py` | Input validation and message texts |
 | `tests/test_storage.py` | Loading, saving and the unsaved state |
-| `tests/test_core.py` | Task operations, the list view and operation messages |
+| `tests/test_core.py` | Task operations, search, filters, merge sort, summary, the list view and messages |
 | `tests/test_cli.py` | The text-based interface, with scripted input |
 
 ## Code style
@@ -172,7 +207,8 @@ python -m pycodestyle src tests
 ```
 study-planner/
 ├── src/
-│   ├── core.py          Shared core: task operations, validation, messages,
+│   ├── core.py          Shared core: task operations, validation, search,
+│   │                    filters, merge sort, summary, messages,
 │   │                    persistence coordination
 │   ├── storage.py       JSON loading and saving
 │   └── cli.py           Text-based interface
