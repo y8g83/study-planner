@@ -2,14 +2,15 @@
 
 Both the text (CLI) and the Tkinter (GUI) versions call this module; neither
 interface validates input or builds messages itself. This module implements
-the task operations (FR1-FR4), input validation (FR5) and the list view, and
-coordinates FR6 loading, saving and the unsaved state; ``storage`` does the
-file work.
+the task operations (FR1-FR4), input validation (FR5), search, filters and
+merge sort (FR7-FR9), the summary (FR10) and the list view, and coordinates
+FR6 loading, saving and the unsaved state; ``storage`` does the file work.
 """
 
 import re
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
 
 import storage
 
@@ -41,6 +42,7 @@ PRIORITIES = ("High", "Medium", "Low")
 STATUSES = ("Pending", "In Progress", "Completed")
 DEFAULT_PRIORITY = "Medium"
 DEFAULT_STATUS = "Pending"
+COMPLETED = "Completed"
 
 # Fields that an edit (FR2) may change; status changes only through FR4.
 EDITABLE_FIELDS = ("title", "subject", "description", "due_date", "priority")
@@ -366,6 +368,197 @@ def confirms_deletion(answer):
     return answer.strip().casefold() in ("y", "yes")
 
 
+# --- View state: search, filters and sort (FR7-FR9) --------------------------
+
+SEARCH_FIELDS = ("title", "description", "subject")
+
+SORT_DUE_DATE = "due date"
+SORT_PRIORITY = "priority"
+SORT_STATUS = "status"
+SORT_SUBJECT = "subject"
+SORT_FIELDS = (SORT_DUE_DATE, SORT_PRIORITY, SORT_STATUS, SORT_SUBJECT)
+
+PRIORITY_RANK = {value: rank for rank, value in enumerate(PRIORITIES)}
+STATUS_RANK = {value: rank for rank, value in enumerate(STATUSES)}
+
+
+@dataclass
+class ViewState:
+    """Session-only display settings; never saved to the data file.
+
+    ``search`` is the trimmed query (empty for no search). ``status`` and
+    ``priority`` are canonical values or ``None``; ``subject`` is the
+    trimmed subject text or ``None``. ``sort`` is one of ``SORT_FIELDS``
+    or ``None`` for stored order.
+    """
+
+    search: str = ""
+    status: str = None
+    priority: str = None
+    subject: str = None
+    sort: str = None
+
+
+def matches_search(task, query):
+    """Whether ``task`` matches a search query (FR7).
+
+    The query is trimmed; an empty query matches every task. Otherwise
+    the query must appear, after ``casefold()``, in the title, the
+    description or the subject.
+    """
+    query = query.strip().casefold()
+    return not query or any(query in task[name].casefold()
+                            for name in SEARCH_FIELDS)
+
+
+def matches_filters(task, view):
+    """Whether ``task`` passes every active filter of ``view`` (FR8).
+
+    Status and priority compare canonical values; the subject is trimmed
+    and compared exactly after ``casefold()``, so ``Math`` does not match
+    ``Mathematics``. Inactive filters are ignored.
+    """
+    if view.status is not None and task["status"] != view.status:
+        return False
+    if view.priority is not None and task["priority"] != view.priority:
+        return False
+    if view.subject is not None:
+        subject = view.subject.strip().casefold()
+        if subject and task["subject"].casefold() != subject:
+            return False
+    return True
+
+
+def sort_key(sort):
+    """Return the key function of a sort field (FR9).
+
+    Due date sorts ascending; priority, status and subject sort by their
+    rank or case-folded text, then by due date. ISO dates in
+    ``YYYY-MM-DD`` form compare correctly as strings.
+    """
+    if sort == SORT_DUE_DATE:
+        return lambda task: (task["due_date"],)
+    if sort == SORT_PRIORITY:
+        return lambda task: (PRIORITY_RANK[task["priority"]],
+                             task["due_date"])
+    if sort == SORT_STATUS:
+        return lambda task: (STATUS_RANK[task["status"]], task["due_date"])
+    if sort == SORT_SUBJECT:
+        return lambda task: (task["subject"].casefold(), task["due_date"])
+    raise ValueError(f"unknown sort field: {sort!r}")
+
+
+def merge_sort(items, key):
+    """Return a new list of ``items`` in stable ascending order of ``key``.
+
+    Each item's key is calculated once, in one linear pass, before
+    sorting. The merge sort makes O(n log n) key comparisons and uses
+    O(n) auxiliary space. Items with equal keys keep their original
+    relative order, so the stored order is the final tie-breaker; the
+    input list is never changed.
+    """
+    keyed = [(key(item), item) for item in items]
+    return [item for _, item in _merge_sort_keyed(keyed)]
+
+
+def _merge_sort_keyed(pairs):
+    if len(pairs) <= 1:
+        return list(pairs)
+    middle = len(pairs) // 2
+    left = _merge_sort_keyed(pairs[:middle])
+    right = _merge_sort_keyed(pairs[middle:])
+    merged = []
+    i = j = 0
+    while i < len(left) and j < len(right):
+        # Taking from the left on equal keys keeps the sort stable.
+        if right[j][0] < left[i][0]:
+            merged.append(right[j])
+            j += 1
+        else:
+            merged.append(left[i])
+            i += 1
+    merged.extend(left[i:])
+    merged.extend(right[j:])
+    return merged
+
+
+def sort_tasks(tasks, sort):
+    """Return ``tasks`` in the order of ``sort``, as a new list (FR9).
+
+    With no sort (``None``), the stored order is kept.
+    """
+    if sort is None:
+        return list(tasks)
+    return merge_sort(tasks, sort_key(sort))
+
+
+def search_line(view):
+    """The CLI ``Search:`` line: the query in quotes, or ``none``.
+
+    Double quotation marks inside the query are escaped with a backslash.
+    """
+    query = view.search.strip()
+    if not query:
+        return "Search: none"
+    escaped = query.replace('"', '\\"')
+    return f'Search: "{escaped}"'
+
+
+def sort_line(view):
+    """The CLI ``Sort:`` line, for example ``Sort: due date``."""
+    return f"Sort: {view.sort or 'none'}"
+
+
+# --- Summary (FR10) ----------------------------------------------------------
+
+@dataclass(frozen=True)
+class Summary:
+    """Summary figures; ``completion`` is the formatted percentage."""
+
+    total: int
+    completed: int
+    remaining: int
+    overdue: int
+    completion: str
+
+    def lines(self):
+        """Return the exact summary lines, shared by both versions."""
+        return [f"Total: {self.total}",
+                f"Completed: {self.completed}",
+                f"Remaining: {self.remaining}",
+                f"Overdue: {self.overdue}",
+                f"Completion: {self.completion}"]
+
+
+def completion_percentage(completed, total):
+    """Completed share of ``total`` as text, rounded half-up to 0.1 %.
+
+    ``Decimal`` keeps the arithmetic exact, so 1 of 16 gives ``6.3%``.
+    With no tasks, the result is ``0.0%``.
+    """
+    if total == 0:
+        return "0.0%"
+    percentage = Decimal(completed * 100) / Decimal(total)
+    rounded = percentage.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    return f"{rounded}%"
+
+
+def summarise(tasks, today):
+    """Calculate the summary of ``tasks`` on the date ``today`` (FR10).
+
+    A task is overdue when its due date is earlier than ``today`` and it
+    is not ``Completed``; a task due today is not overdue. The core never
+    reads the clock: ``today`` is always supplied.
+    """
+    total = len(tasks)
+    completed = sum(1 for task in tasks if task["status"] == COMPLETED)
+    overdue = sum(1 for task in tasks
+                  if task["status"] != COMPLETED
+                  and date.fromisoformat(task["due_date"]) < today)
+    return Summary(total, completed, total - completed, overdue,
+                   completion_percentage(completed, total))
+
+
 # --- Persistence (FR6) -------------------------------------------------------
 
 LOADED = "loaded"
@@ -376,7 +569,8 @@ class Planner:
 
     ``tasks`` is the task list in stored order and ``next_id`` the ID that
     the next added task receives. ``unsaved`` is true after a failed save
-    and becomes false again after the next successful save.
+    and becomes false again after the next successful save. ``view`` holds
+    the session's search, filters and sort, which are never saved.
     """
 
     def __init__(self, path, tasks, next_id):
@@ -384,6 +578,7 @@ class Planner:
         self.tasks = tasks
         self.next_id = next_id
         self.unsaved = False
+        self.view = ViewState()
 
     # --- Task operations (FR1-FR4) ------------------------------------------
 
@@ -485,12 +680,31 @@ class Planner:
     def list_view(self):
         """Return the tasks to display, as copies, and the empty message.
 
-        The tasks are in stored order. When there are none, ``message`` is
-        the key of the message to show instead. Viewing never changes the
-        data or the unsaved state.
+        Search and filters are combined with AND in one linear pass, then
+        the selected sort orders the result; without a sort, the stored
+        order is kept. When nothing is shown, ``message`` is
+        ``NO_TASKS_YET`` if there are no stored tasks at all, otherwise
+        ``NO_MATCHING_TASKS``. Viewing never changes the data or the
+        unsaved state.
         """
-        tasks = [dict(task) for task in self.tasks]
-        return ListView(tasks, None if tasks else NO_TASKS_YET)
+        shown = [dict(task) for task in self.tasks
+                 if matches_search(task, self.view.search)
+                 and matches_filters(task, self.view)]
+        shown = sort_tasks(shown, self.view.sort)
+        if not self.tasks:
+            message = NO_TASKS_YET
+        elif not shown:
+            message = NO_MATCHING_TASKS
+        else:
+            message = None
+        return ListView(shown, message)
+
+    # --- Summary (FR10) ------------------------------------------------------
+
+    def summary(self, today):
+        """Summarise every in-memory task, ignoring search, filters and
+        sort, including changes that are not yet saved."""
+        return summarise(self.tasks, today)
 
     # --- Saving -------------------------------------------------------------
 

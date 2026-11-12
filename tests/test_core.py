@@ -6,8 +6,10 @@ directory. A failed save is simulated by making ``storage.save`` raise
 """
 
 import json
+import random
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest import mock
 
@@ -395,6 +397,400 @@ class TestMessages(unittest.TestCase):
             with self.subTest(key=key):
                 with self.assertRaises(core.MessageError):
                     core.render_message(key)
+
+
+# --- FR7-FR10 datasets ------------------------------------------------------
+
+def fr7_dataset():
+    """FR7 shared dataset: tasks 1, 2, 3; ``next_id = 4``."""
+    return [task(1, title="Revise Algebra", subject="Mathematics"),
+            task(2, title="Essay draft", subject="History",
+                 description="Check sources for the Tudor period"),
+            task(3, title="Lab report", subject="Biology",
+                 description="Include algebra-based calculations")]
+
+
+def fr8_dataset():
+    """FR8 base dataset: tasks 1-4, task 4's subject in lower case."""
+    return [task(1, subject="Mathematics", priority="High"),
+            task(2, subject="History", status="In Progress"),
+            task(3, subject="Biology", priority="High", status="Completed"),
+            task(4, subject="mathematics", priority="Low")]
+
+
+def fr9_dataset():
+    """FR9 dataset: five tasks with deliberate ties; ``next_id = 6``."""
+    return [task(1, subject="Mathematics", priority="High",
+                 due_date="2026-11-20"),
+            task(2, subject="History", status="In Progress",
+                 due_date="2026-11-10"),
+            task(3, subject="biology", priority="High", status="Completed",
+                 due_date="2026-11-10"),
+            task(4, subject="Mathematics", priority="Low",
+                 due_date="2026-11-05"),
+            task(5, subject="Art", due_date="2026-11-20")]
+
+
+def ids(tasks):
+    return [t["id"] for t in tasks]
+
+
+class ViewTestCase(CoreTestCase):
+    """Planner on a saved data file, so unchanged bytes can be checked."""
+
+    def start_with(self, tasks, next_id):
+        storage.save(self.path, tasks, next_id)
+        self.before = self.path.read_bytes()
+        self.original = [dict(t) for t in tasks]
+        self.next_id = next_id
+        return core.start(self.path).planner
+
+    def shown(self, planner):
+        return ids(planner.list_view().tasks)
+
+    def assertStoredUnchanged(self, planner):
+        self.assertEqual(planner.tasks, self.original)
+        self.assertEqual(planner.next_id, self.next_id)
+        self.assertEqual(self.path.read_bytes(), self.before)
+        self.assertFalse(planner.unsaved)
+
+
+class TestFR7Search(ViewTestCase):
+
+    def search(self, query, tasks=None, next_id=4):
+        if tasks is None:
+            tasks = fr7_dataset()
+        planner = self.start_with(tasks, next_id)
+        planner.view.search = query
+        return planner
+
+    def test_ac1_partial_case_insensitive_title_match(self):
+        planner = self.search("REVISE")
+        self.assertEqual(self.shown(planner), [1])
+        self.assertStoredUnchanged(planner)
+
+    def test_ac2_description_subject_and_two_fields(self):
+        for query, expected in (("tudor", [2]), ("BIO", [3]),
+                                ("algebra", [1, 3])):
+            with self.subTest(query=query):
+                planner = self.search(query)
+                self.assertEqual(self.shown(planner), expected)
+                self.assertStoredUnchanged(planner)
+
+    def test_ac3_no_match_message(self):
+        planner = self.search("physics")
+        view = planner.list_view()
+        self.assertEqual(view.tasks, [])
+        self.assertEqual(view.message, core.NO_MATCHING_TASKS)
+        self.assertStoredUnchanged(planner)
+
+    def test_ac3_empty_list_message_takes_precedence(self):
+        planner = self.search("essay", tasks=[], next_id=1)
+        self.assertEqual(planner.list_view().message, core.NO_TASKS_YET)
+
+    def test_ac4_empty_whitespace_and_trimmed_queries(self):
+        for query, expected in (("", [1, 2, 3]), ("   ", [1, 2, 3]),
+                                ("  essay draft  ", [2]),
+                                ("essay  draft", [])):
+            with self.subTest(query=query):
+                planner = self.search(query)
+                self.assertEqual(self.shown(planner), expected)
+                self.assertStoredUnchanged(planner)
+        self.assertEqual(planner.list_view().message,
+                         core.NO_MATCHING_TASKS)
+
+    def test_ac5_search_and_subject_filter_combine_with_and(self):
+        for query, subject, expected in (
+                ("algebra", None, [1, 3]),
+                ("algebra", "Mathematics", [1]),
+                ("algebra", "Biology", [3]),
+                ("essay", "Mathematics", [])):
+            with self.subTest(query=query, subject=subject):
+                planner = self.search(query)
+                planner.view.subject = subject
+                self.assertEqual(self.shown(planner), expected)
+                self.assertStoredUnchanged(planner)
+
+    def test_ac6_casefold_matches_sharp_s(self):
+        tasks = fr7_dataset() + [task(4, title="Straße survey",
+                                      subject="Geography")]
+        planner = self.search("STRASSE", tasks=tasks, next_id=5)
+        self.assertEqual(self.shown(planner), [4])
+        self.assertStoredUnchanged(planner)
+
+    def test_ac7_search_persists_across_adds_and_clears(self):
+        planner = self.search("algebra")
+        self.assertEqual(self.shown(planner), [1, 3])
+        self.assertEqual(core.search_line(planner.view),
+                         'Search: "algebra"')
+        self.assertEqual(planner.add_task(
+            "Algebra quiz", "Mathematics", "2026-11-20").task["id"], 4)
+        self.assertEqual(self.shown(planner), [1, 3, 4])
+        planner.add_task("History notes", "History", "2026-11-20")
+        self.assertEqual(self.shown(planner), [1, 3, 4])
+        planner.view.search = ""
+        self.assertEqual(self.shown(planner), [1, 2, 3, 4, 5])
+        self.assertEqual(core.search_line(planner.view), "Search: none")
+        restarted = core.start(self.path).planner
+        self.assertEqual(restarted.view, core.ViewState())
+        self.assertEqual(self.shown(restarted), [1, 2, 3, 4, 5])
+        self.assertEqual(set(self.saved_data()), {"next_id", "tasks"})
+
+    def test_search_does_not_restrict_operations_by_id(self):
+        planner = self.search("algebra")
+        self.assertEqual(planner.find_task("2").outcome, core.FOUND)
+
+    def test_search_line_trims_keeps_case_and_escapes_quotes(self):
+        for query, line in (("  Algebra  ", 'Search: "Algebra"'),
+                            ('say "hi"', 'Search: "say \\"hi\\""'),
+                            ("   ", "Search: none")):
+            with self.subTest(query=query):
+                self.assertEqual(core.search_line(
+                    core.ViewState(search=query)), line)
+
+
+class TestFR8Filters(ViewTestCase):
+
+    def filtered(self, **filters):
+        planner = self.start_with(fr8_dataset(), 5)
+        for name, value in filters.items():
+            setattr(planner.view, name, value)
+        return planner
+
+    def test_expected_results_table(self):
+        for filters, expected in (
+                ({}, [1, 2, 3, 4]),
+                ({"status": "Pending"}, [1, 4]),
+                ({"priority": "High"}, [1, 3]),
+                ({"subject": "Mathematics"}, [1, 4]),
+                ({"subject": "  MATHEMATICS  "}, [1, 4]),
+                ({"subject": "Math"}, []),
+                ({"subject": "   "}, [1, 2, 3, 4]),
+                ({"status": "Pending", "priority": "High"}, [1]),
+                ({"status": "Pending", "priority": "Low",
+                  "subject": "Mathematics"}, [4]),
+                ({"status": "Completed", "subject": "History"}, [])):
+            with self.subTest(filters=filters):
+                planner = self.filtered(**filters)
+                view = planner.list_view()
+                self.assertEqual(ids(view.tasks), expected)
+                if not expected:
+                    self.assertEqual(view.message, core.NO_MATCHING_TASKS)
+                self.assertEqual(planner.tasks[3]["subject"], "mathematics")
+                self.assertStoredUnchanged(planner)
+
+    def test_ac5_filter_persists_across_adds_and_resets_on_restart(self):
+        planner = self.filtered(status="Pending")
+        self.assertEqual(self.shown(planner), [1, 4])
+        self.assertEqual(planner.add_task(
+            "Lab", "Physics", "2026-11-20", status="Pending").task["id"], 5)
+        self.assertEqual(self.shown(planner), [1, 4, 5])
+        planner.add_task("Quiz", "Physics", "2026-11-20",
+                         status="Completed")
+        self.assertEqual(self.shown(planner), [1, 4, 5])
+        planner.view.status = None
+        self.assertEqual(self.shown(planner), [1, 2, 3, 4, 5, 6])
+        restarted = core.start(self.path).planner
+        self.assertEqual(restarted.view, core.ViewState())
+        self.assertEqual(self.shown(restarted), [1, 2, 3, 4, 5, 6])
+        self.assertEqual(set(self.saved_data()), {"next_id", "tasks"})
+
+    def test_ac7_empty_list_message_with_active_filter(self):
+        planner = self.start_with([], 5)
+        planner.view.status = "Pending"
+        self.assertEqual(planner.list_view().message, core.NO_TASKS_YET)
+        self.assertStoredUnchanged(planner)
+
+    def test_ac8_subject_named_all_is_an_ordinary_subject(self):
+        planner = self.start_with(fr8_dataset() + [task(5, subject="All")],
+                                  6)
+        planner.view.subject = "All"
+        self.assertEqual(self.shown(planner), [5])
+        planner.view.subject = None
+        self.assertEqual(self.shown(planner), [1, 2, 3, 4, 5])
+        self.assertStoredUnchanged(planner)
+
+
+class TestFR9Sort(ViewTestCase):
+
+    def sorted_by(self, sort, **filters):
+        planner = self.start_with(fr9_dataset(), 6)
+        planner.view.sort = sort
+        for name, value in filters.items():
+            setattr(planner.view, name, value)
+        return planner
+
+    def test_ac1_to_ac5_expected_orders(self):
+        for sort, expected in ((None, [1, 2, 3, 4, 5]),
+                               (core.SORT_DUE_DATE, [4, 2, 3, 1, 5]),
+                               (core.SORT_PRIORITY, [3, 1, 2, 5, 4]),
+                               (core.SORT_STATUS, [4, 1, 5, 2, 3]),
+                               (core.SORT_SUBJECT, [5, 3, 2, 4, 1])):
+            with self.subTest(sort=sort):
+                planner = self.sorted_by(sort)
+                self.assertEqual(self.shown(planner), expected)
+                self.assertEqual(ids(planner.tasks), [1, 2, 3, 4, 5])
+                self.assertStoredUnchanged(planner)
+
+    def test_ac5_plain_comparison_would_be_wrong(self):
+        plain = sorted(fr9_dataset(),
+                       key=lambda t: (t["subject"], t["due_date"]))
+        self.assertEqual(ids(plain), [5, 2, 4, 1, 3])
+
+    def test_ac6_filter_then_sort(self):
+        planner = self.sorted_by(core.SORT_DUE_DATE, status="Pending")
+        self.assertEqual(self.shown(planner), [4, 1, 5])
+        self.assertStoredUnchanged(planner)
+
+    def test_ac7_boundaries(self):
+        key = core.sort_key(core.SORT_DUE_DATE)
+        self.assertEqual(core.merge_sort([], key), [])
+        single = [task(1)]
+        result = core.merge_sort(single, key)
+        self.assertEqual(result, single)
+        self.assertIsNot(result, single)
+        equal = [task(7), task(3), task(9)]
+        for sort in core.SORT_FIELDS:
+            with self.subTest(sort=sort):
+                self.assertEqual(ids(core.merge_sort(
+                    equal, core.sort_key(sort))), [7, 3, 9])
+
+    def test_ac8_matches_builtin_sorted(self):
+        generator = random.Random(44102)
+        tasks = [task(n, subject=generator.choice(
+                          ["Art", "art", "Biology", "history", "Économie"]),
+                      due_date=f"2026-11-{generator.randint(1, 5):02d}",
+                      priority=generator.choice(core.PRIORITIES),
+                      status=generator.choice(core.STATUSES))
+                 for n in range(1, 201)]
+        datasets = (fr9_dataset(), tasks, [], [task(1)])
+        for sort in core.SORT_FIELDS:
+            for data in datasets:
+                with self.subTest(sort=sort, size=len(data)):
+                    key = core.sort_key(sort)
+                    self.assertEqual(core.merge_sort(data, key),
+                                     sorted(data, key=key))
+
+    def test_ac8_keys_calculated_once_per_task(self):
+        calls = []
+
+        def key(item):
+            calls.append(item["id"])
+            return item["due_date"]
+
+        core.merge_sort(fr9_dataset(), key)
+        self.assertEqual(sorted(calls), [1, 2, 3, 4, 5])
+
+    def test_merge_sort_never_mutates_input(self):
+        data = fr9_dataset()
+        snapshot = [dict(t) for t in data]
+        core.merge_sort(data, core.sort_key(core.SORT_SUBJECT))
+        self.assertEqual(data, snapshot)
+
+    def test_ac9_changing_and_clearing_the_sort(self):
+        planner = self.sorted_by(core.SORT_PRIORITY)
+        self.assertEqual(core.sort_line(planner.view), "Sort: priority")
+        planner.view.sort = core.SORT_STATUS
+        self.assertEqual(self.shown(planner), [4, 1, 5, 2, 3])
+        self.assertEqual(core.sort_line(planner.view), "Sort: status")
+        planner.view.sort = None
+        self.assertEqual(self.shown(planner), [1, 2, 3, 4, 5])
+        self.assertEqual(core.sort_line(planner.view), "Sort: none")
+
+    def test_sort_labels(self):
+        self.assertEqual([core.sort_line(core.ViewState(sort=s))
+                          for s in (None,) + core.SORT_FIELDS],
+                         ["Sort: none", "Sort: due date", "Sort: priority",
+                          "Sort: status", "Sort: subject"])
+
+    def test_ac10_restart_has_no_sort(self):
+        planner = self.sorted_by(core.SORT_SUBJECT)
+        restarted = core.start(self.path).planner
+        self.assertIsNone(restarted.view.sort)
+        self.assertEqual(self.shown(restarted), [1, 2, 3, 4, 5])
+        self.assertEqual(set(self.saved_data()), {"next_id", "tasks"})
+        self.assertStoredUnchanged(planner)
+
+    def test_ac11_sort_kept_after_add(self):
+        planner = self.sorted_by(core.SORT_DUE_DATE)
+        planner.add_task("New", "History", "2026-11-10")
+        self.assertEqual(planner.view.sort, core.SORT_DUE_DATE)
+        self.assertEqual(self.shown(planner), [4, 2, 3, 6, 1, 5])
+        self.assertEqual(ids(planner.tasks), [1, 2, 3, 4, 5, 6])
+
+
+class TestFR10Summary(ViewTestCase):
+
+    def summary_lines(self, tasks, today):
+        return core.summarise(tasks, today).lines()
+
+    def test_ac1_fr9_dataset(self):
+        self.assertEqual(self.summary_lines(fr9_dataset(),
+                                            date(2026, 11, 12)), [
+            "Total: 5", "Completed: 1", "Remaining: 4", "Overdue: 2",
+            "Completion: 20.0%"])
+
+    def test_ac2_task_due_today_not_overdue(self):
+        summary = core.summarise(fr9_dataset(), date(2026, 11, 10))
+        self.assertEqual(summary.overdue, 1)
+
+    def test_ac3_empty_list(self):
+        self.assertEqual(self.summary_lines([], date(2026, 11, 12)), [
+            "Total: 0", "Completed: 0", "Remaining: 0", "Overdue: 0",
+            "Completion: 0.0%"])
+
+    def test_ac4_half_up_rounding(self):
+        tasks = [task(n) for n in range(1, 17)]
+        tasks[0]["status"] = "Completed"
+        self.assertEqual(f"{100 / 16:.1f}", "6.2")
+        self.assertEqual(core.summarise(tasks, date(2026, 11, 12))
+                         .completion, "6.3%")
+
+    def test_ac5_completed_tasks_never_overdue(self):
+        tasks = [task(n, status="Completed", due_date="2026-01-01")
+                 for n in (1, 2, 3)]
+        self.assertEqual(self.summary_lines(tasks, date(2026, 11, 12)), [
+            "Total: 3", "Completed: 3", "Remaining: 0", "Overdue: 0",
+            "Completion: 100.0%"])
+
+    def test_ac6_filters_search_and_sort_do_not_limit_summary(self):
+        planner = self.start_with(fr9_dataset(), 6)
+        planner.view.status = "Pending"
+        planner.view.search = "zzz"
+        planner.view.sort = core.SORT_SUBJECT
+        self.assertEqual(planner.summary(date(2026, 11, 12)).lines(), [
+            "Total: 5", "Completed: 1", "Remaining: 4", "Overdue: 2",
+            "Completion: 20.0%"])
+
+    def test_ac7_summary_reflects_unsaved_changes(self):
+        planner = self.start_with(fr9_dataset(), 6)
+        today = date(2026, 11, 12)
+        self.assertEqual(planner.summary(today).completion, "20.0%")
+        with failing_save():
+            planner.change_status("4", "Completed")
+        self.assertEqual(planner.summary(today).lines(), [
+            "Total: 5", "Completed: 2", "Remaining: 3", "Overdue: 1",
+            "Completion: 40.0%"])
+        self.assertEqual(self.path.read_bytes(), self.before)
+
+    def test_ac8_supplied_dates(self):
+        planner = self.start_with(fr9_dataset(), 6)
+        self.assertEqual(planner.summary(date(2026, 11, 10)).overdue, 1)
+        self.assertEqual(planner.summary(date(2026, 11, 12)).overdue, 2)
+
+    def test_ac9_one_decimal_place(self):
+        for completed, total, text in ((0, 0, "0.0%"), (3, 3, "100.0%"),
+                                       (1, 3, "33.3%"), (2, 3, "66.7%"),
+                                       (1, 8, "12.5%"), (1, 2, "50.0%")):
+            with self.subTest(completed=completed, total=total):
+                self.assertEqual(
+                    core.completion_percentage(completed, total), text)
+
+    def test_ac10_summary_changes_nothing(self):
+        planner = self.start_with(fr9_dataset(), 6)
+        planner.summary(date(2026, 11, 12))
+        planner.summary(date(2026, 11, 12))
+        self.assertStoredUnchanged(planner)
 
 
 if __name__ == "__main__":
