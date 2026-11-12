@@ -308,6 +308,14 @@ class TestFR1Add(CLITestCase):
             "Priority must exactly match one of the permitted values."])
         self.assertFalse(self.path.exists())
 
+    def test_ac2_selected_values_on_empty_list(self):
+        console = self.run_cli("2", "Lab report", "Biology", "",
+                               "2026-11-30", "High", "Completed", "0")
+        self.assertIn("Task 1 added.", console.lines)
+        self.assertEqual(self.saved_data(), {"next_id": 2, "tasks": [task(
+            1, title="Lab report", subject="Biology", due_date="2026-11-30",
+            priority="High", status="Completed")]})
+
     def test_ac4_failed_save_shows_id_and_warning(self):
         self.write_data(three_tasks(), 5)
         with failing_save():
@@ -422,6 +430,15 @@ class TestFR3Delete(CLITestCase):
         self.assertIn("No task with ID 4 exists.", console.lines)
         self.assertPromptNotShown(console, "Delete task")
 
+    def test_ac5_last_task_deleted_id_not_reused(self):
+        self.write_data([task(3)], 5)
+        console = self.run_cli("4", "3", "y", "1", "2", "New", "History", "",
+                               "2026-12-01", "", "", "0")
+        self.assertIn("Task 3 deleted.", console.lines)
+        self.assertIn("No tasks yet.", console.lines)
+        self.assertIn("Task 5 added.", console.lines)
+        self.assertEqual([t["id"] for t in self.saved_data()["tasks"]], [5])
+
     def test_ac6_failed_save_keeps_deletion_in_memory(self):
         with failing_save():
             console = self.run_cli("4", "2", "yes", "1", "0", "2")
@@ -459,6 +476,14 @@ class TestFR4Status(CLITestCase):
                 self.assertIn("Status must exactly match one of the "
                               "permitted values.", console.lines)
                 self.assertEqual(self.path.read_bytes(), self.before)
+
+    def test_ac6_failed_save_shows_status_and_warning(self):
+        with failing_save():
+            console = self.run_cli("5", "2", "Completed", "0", "2")
+        changed = console.lines.index("Task 2 status changed to Completed.")
+        self.assertEqual(console.lines[changed + 1], SAVE_FAILED)
+        self.assertIn(UNSAVED, console.lines[changed:])
+        self.assertEqual(self.path.read_bytes(), self.before)
 
     def test_ac5_bad_ids_rejected_before_status_question(self):
         for text, expected in (
@@ -944,6 +969,41 @@ class TestFR11ViewLines(ViewCLITestCase):
         self.assertEqual(console.lines[start:start + 3],
                          ["Search: none", "Filters: none", "Sort: none"])
         self.assertEqual(console.lines[start + 3], DEFAULT_VIEW[0])
+
+    def test_ac2_empty_list_with_and_without_filter(self):
+        console = self.run_cli("1", *STATUS, "Pending", "0")
+        plain, filtered = self.views(console)
+        self.assertEqual((plain.ids, plain.message), ([], NO_TASKS))
+        self.assertEqual((filtered.ids, filtered.message), ([], NO_TASKS))
+        self.assertNotIn(DEFAULT_VIEW[0], console.lines)
+        self.assertFalse(self.folder.exists())
+
+    def test_ac3_stored_order_after_add_edit_delete_and_restart(self):
+        self.start_with([task(1, due_date="2026-11-30"),
+                         task(2, due_date="2026-11-20"),
+                         task(3, due_date="2026-11-10")], 4)
+        console = self.run_cli(
+            "2", "Fourth", "History", "", "2026-11-25", "", "", "1",
+            "3", "2", "1", "Renamed", "1",
+            "4", "2", "y", "1", "0")
+        added, edited, deleted = self.views(console)
+        self.assertEqual(added.ids, [1, 2, 3, 4])
+        self.assertEqual(edited.ids, [1, 2, 3, 4])
+        self.assertIn("2  | Renamed                        | 2026-11-20 | "
+                      "Medium   | Pending", console.lines)
+        self.assertEqual(deleted.ids, [1, 3, 4])
+        self.assertEqual(self.last_view("1").ids, [1, 3, 4])
+
+    def test_ac5_unsaved_changes_listed_with_indicator(self):
+        self.start_with(fr7_dataset(), 4)
+        with failing_save():
+            console = self.run_cli("2", "Quiz", "History", "", "2026-11-25",
+                                   "", "", "1", "0", "2")
+        view = self.views(console)[-1]
+        self.assertEqual(view.ids, [1, 2, 3, 4])
+        after_view = console.lines[console.lines.index(view.search):]
+        self.assertIn(UNSAVED, after_view)
+        self.assertFileUnchanged()
 
     def test_ac4_sort_and_search_then_cleared(self):
         self.start_with([task(1, due_date="2026-11-30"),
