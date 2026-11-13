@@ -7,12 +7,28 @@ merge sort (FR7-FR9), the summary (FR10) and the list view, and coordinates
 FR6 loading, saving and the unsaved state; ``storage`` does the file work.
 """
 
+import logging
 import re
+import traceback
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 import storage
+
+logger = logging.getLogger("study_planner")
+
+
+def log_internal_error(exc):
+    """Log an unexpected error with its traceback, but without its message.
+
+    The exception message could contain task content, so only the
+    exception type and the traceback frames are written to standard error.
+    """
+    frames = "".join(traceback.format_tb(exc.__traceback__)).rstrip()
+    logger.error("Unexpected internal error (%s)\n%s",
+                 type(exc).__name__, frames)
+
 
 # --- Field labels (exact, FR5) ---------------------------------------------
 

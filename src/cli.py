@@ -8,12 +8,9 @@ saving all come from the shared core.
 import logging
 import sys
 import textwrap
-import traceback
 from datetime import date
 
 import core
-
-logger = logging.getLogger("study_planner")
 
 MENU = (
     ("1", "View tasks"),
@@ -90,17 +87,6 @@ def format_task_table(tasks):
     return lines
 
 
-def log_internal_error(exc):
-    """Log an unexpected error with its traceback, but without its message.
-
-    The exception message could contain task content, so only the
-    exception type and the traceback frames are written to standard error.
-    """
-    frames = "".join(traceback.format_tb(exc.__traceback__)).rstrip()
-    logger.error("Unexpected internal error (%s)\n%s",
-                 type(exc).__name__, frames)
-
-
 class StudyPlannerCLI:
     """The menu loop of one session, working on a loaded planner."""
 
@@ -160,7 +146,7 @@ class StudyPlannerCLI:
         except (EOFError, KeyboardInterrupt):
             raise
         except Exception as exc:
-            log_internal_error(exc)
+            core.log_internal_error(exc)
             self.show_message(core.INTERNAL_ERROR)
 
     # --- Menu actions ------------------------------------------------------
@@ -330,7 +316,7 @@ def main(path=None, read=input, write=print, today=date.today):
     try:
         started = core.start(path)
     except Exception as exc:
-        log_internal_error(exc)
+        core.log_internal_error(exc)
         write(core.render_message(core.INTERNAL_ERROR))
         return 1
     if not started.ok:

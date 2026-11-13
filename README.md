@@ -2,8 +2,8 @@
 
 A Python application that helps students organise study tasks, coursework
 deadlines, priorities and completion progress. It has a text-based (CLI)
-version; a Tkinter (GUI) version is planned. Both use one shared core module
-for validation, task rules, messages and storage, so neither interface
+version and a Tkinter (GUI) version. Both use one shared core module for
+validation, task rules, messages and storage, so neither interface
 implements business rules itself.
 
 ## Current status
@@ -16,7 +16,7 @@ implements business rules itself.
 | JSON persistence (`src/storage.py`, coordinated by `src/core.py`) | Implemented and tested |
 | Search, filters, merge sort and summary (`src/core.py`) | Implemented and tested |
 | Text-based interface (`src/cli.py`) | Implemented and tested |
-| Tkinter interface (GUI) | Planned |
+| Tkinter interface (`src/gui.py`) | Implemented and tested |
 
 ## Implemented features
 
@@ -118,7 +118,7 @@ Example data file:
 
 - Python 3.12
 - No third-party packages: the application uses only the Python standard
-  library, and the planned GUI uses Tkinter, which is included with the
+  library, including Tkinter for the GUI, which is included with the
   standard Python installers.
 
 ## Setup
@@ -173,6 +173,36 @@ The main menu offers:
 - The unsaved-changes prompt cannot be shown when the program is ended
   forcibly, for example with Ctrl+C.
 
+## Running the GUI version
+
+From the repository root:
+
+```
+python src/gui.py
+```
+
+- The task list is shown from start-up, with the subject and any description
+  on grey rows beneath each task. Select a task, then use **Edit task**,
+  **Delete task** or **Change status**; double-clicking a task also opens
+  it for editing.
+- The add and edit forms show validation errors inside the form and keep
+  the entered values. The edit form starts with the task's current values;
+  only changed fields are submitted.
+- Search, the status, priority and subject filters, and **Sort by** apply
+  as soon as they change. **Clear subject** removes the subject filter, so
+  a subject named `All` can still be filtered.
+- The **Summary** panel updates after every change; **Refresh**
+  recalculates it with the current date.
+- While changes are unsaved, the window title shows `(unsaved)`. **Exit**
+  and the window's close button then offer **Retry saving**, **Exit without
+  saving** and **Cancel exit**.
+- If the data file is invalid, an error is shown and the window does not
+  open; the file is left unchanged.
+- Unexpected errors are reported with a short message and their details are
+  written to standard error. When the GUI is started with `pythonw` or by
+  double-clicking, standard error is not visible; start it with `python`
+  from a terminal to see the details.
+
 ## Running the tests
 
 From the repository root:
@@ -191,6 +221,7 @@ and never read or write the real data file.
 | `tests/test_storage.py` | Loading, saving and the unsaved state |
 | `tests/test_core.py` | Task operations, search, filters, merge sort, summary, the list view and messages |
 | `tests/test_cli.py` | The text-based interface, with scripted input |
+| `tests/test_gui.py` | The GUI on a hidden Tk window; skipped when no display is available |
 
 ## Code style
 
@@ -211,13 +242,15 @@ study-planner/
 │   │                    filters, merge sort, summary, messages,
 │   │                    persistence coordination
 │   ├── storage.py       JSON loading and saving
-│   └── cli.py           Text-based interface
+│   ├── cli.py           Text-based interface
+│   └── gui.py           Tkinter interface
 ├── tests/
 │   ├── helpers.py       Puts src/ on the import path
 │   ├── test_validation.py
 │   ├── test_storage.py
 │   ├── test_core.py
-│   └── test_cli.py
+│   ├── test_cli.py
+│   └── test_gui.py
 ├── report/
 │   ├── main.tex         Coursework report (LaTeX)
 │   └── references.bib
