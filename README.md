@@ -233,6 +233,30 @@ python -m pip install pycodestyle
 python -m pycodestyle src tests
 ```
 
+## Performance
+
+`scripts/measure_performance.py` times search and the merge sort on 500
+generated tasks through the shared core, without touching the data file:
+
+```
+python scripts/measure_performance.py
+```
+
+Measured on 14 November 2026 (Python 3.12.5, Windows 11, Intel 64-bit
+processor); each figure is the fastest of 7 repeats of 50 calls:
+
+| Operation | Time per call (ms) |
+|---|---|
+| Search, matching query (`algebra`) | 0.46 |
+| Search, no match (`zzz`) | 0.35 |
+| Merge sort by due date | 0.81 |
+| Merge sort by priority | 0.82 |
+| Merge sort by status | 0.80 |
+| Merge sort by subject | 0.88 |
+
+Search is a linear scan of the task list; the merge sort makes
+O(n log n) comparisons and uses O(n) extra space.
+
 ## Project structure
 
 ```
@@ -244,6 +268,8 @@ study-planner/
 │   ├── storage.py       JSON loading and saving
 │   ├── cli.py           Text-based interface
 │   └── gui.py           Tkinter interface
+├── scripts/
+│   └── measure_performance.py  NFR6 timing on 500 tasks
 ├── tests/
 │   ├── helpers.py       Puts src/ on the import path
 │   ├── test_validation.py
