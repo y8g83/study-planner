@@ -18,6 +18,35 @@ implements business rules itself.
 | Text-based interface (`src/cli.py`) | Implemented and tested |
 | Tkinter interface (`src/gui.py`) | Implemented and tested |
 
+## Screenshots
+
+The GUI, with the subject and description of each task beneath it:
+
+![Study Planner main window](docs/screenshots/gui-main.png)
+
+Validation errors from the shared core, shown inside the add form:
+
+![Add task form with validation errors](docs/screenshots/gui-add-validation.png)
+
+The text-based version, filtered by status `Pending` and sorted by due
+date:
+
+```
+Search: none
+Filters: status=Pending
+Sort: due date
+ID | Title                          | Due Date   | Priority | Status
+-------------------------------------------------------------------------
+4  | Prepare revision notes for the | 2026-11-05 | Low      | Pending
+   | final exam                     |            |          |
+     Subject: Mathematics
+1  | Revise Algebra                 | 2026-11-20 | High     | Pending
+     Subject: Mathematics
+     Chapters 3 and 4
+5  | Portfolio review               | 2026-11-24 | Medium   | Pending
+     Subject: Art
+```
+
 ## Implemented features
 
 ### Task operations
@@ -308,5 +337,5 @@ study-planner/
 ├── report/
 │   ├── main.tex         Coursework report (LaTeX)
 │   └── references.bib
-└── docs/                Documentation (currently empty)
+└── docs/screenshots/    Screenshots used in this README
 ```
