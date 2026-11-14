@@ -223,6 +223,34 @@ and never read or write the real data file.
 | `tests/test_cli.py` | The text-based interface, with scripted input |
 | `tests/test_gui.py` | The GUI on a hidden Tk window; skipped when no display is available |
 
+### Test coverage
+
+Coverage is measured with `coverage.py`, a development tool that is not
+needed to run the application:
+
+```
+python -m pip install coverage
+python -m coverage run --branch --source=src -m unittest discover -s tests
+python -m coverage report -m
+```
+
+Measured on 14 November 2026 (317 tests, statement and branch coverage):
+
+| Module | Coverage |
+|---|---|
+| `src/cli.py` | 98% |
+| `src/core.py` | 99% |
+| `src/gui.py` | 92% |
+| `src/storage.py` | 99% |
+| **Total** | **97%** |
+
+The lines not covered are mainly the two programs' start-up code
+(`main()` and the `__main__` blocks), the modal wait of the GUI's choice
+dialog, which the tests replace with scripted answers, and a few defensive
+branches. The start-up code is checked by launching both versions.
+Coverage shows which code ran, not that every requirement is tested; the
+test plan maps every acceptance criterion to its tests.
+
 ## Code style
 
 The code follows PEP 8 and is checked with `pycodestyle`, a development tool
