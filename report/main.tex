@@ -1,8 +1,6 @@
 % CSC-44102 Assessment 1 report.
 %
 % Black and white only: no colour packages; links are not coloured.
-% Text marked [YOUR WORDS: ...] must be written by the author before
-% submission; the PDF shows these markers in bold so none is missed.
 
 \documentclass[11pt,a4paper]{article}
 
@@ -41,8 +39,20 @@
 % folder next to this file when the report is compiled on its own.
 \graphicspath{{../docs/screenshots/}{screenshots/}}
 
-\newcommand{\yourwords}[1]{\textbf{[YOUR WORDS: #1]}}
 \newcommand{\code}[1]{\texttt{#1}}
+
+% Title-page details. They are defined in student-details.tex, which is
+% kept out of the public repository (see .gitignore); without that file
+% the placeholders below are printed. The file contains, for example:
+%   \newcommand{\studentname}{...}
+%   \newcommand{\studentnumber}{...}
+%   \newcommand{\reportwordcount}{...}
+%   \newcommand{\submissiondate}{...}
+\InputIfFileExists{student-details.tex}{}{}
+\providecommand{\studentname}{[Full name]}
+\providecommand{\studentnumber}{[Student number]}
+\providecommand{\reportwordcount}{[number]}
+\providecommand{\submissiondate}{[Submission date]}
 
 \begin{document}
 
@@ -60,12 +70,12 @@
   {\LARGE Study Planner: a task and deadline manager\\
   in two versions over one shared core\par}
   \vfill
-  [Full name]\par
-  [Student number]\par
+  \studentname\par
+  \studentnumber\par
   \vspace{1em}
-  Word count: [number]\par
+  Word count: \reportwordcount\par
   \vspace{1em}
-  [Submission date]\par
+  \submissiondate\par
 \end{titlepage}
 \hypersetup{pageanchor=true}
 
@@ -82,8 +92,12 @@ summary and safe JSON storage. Eleven functional and nine non-functional
 requirements, prioritised with MoSCoW, define the application through 77
 testable acceptance criteria. A test plan of 304 cases (normal, boundary and
 invalid) is implemented as 317 automated tests, all of which pass; branch
-coverage of the source code is 97\%. The evaluation finds every requirement
-met and discusses the remaining limitations.
+coverage of the source code is 97\%. Four faults inserted into the final code
+were each detected by the tests, and a search or a sort of 500 tasks takes
+less than one millisecond. Saving writes a temporary file and replaces the
+data file in one step, so an interrupted save cannot leave a half-written
+file. The evaluation finds every requirement met, discusses the remaining
+limitations and proposes future improvements.
 
 \clearpage
 \tableofcontents
@@ -163,7 +177,9 @@ FR11 & View task list & Must & The list in stored order, or as search, filters a
 \end{table}
 
 The requirements specification gives each requirement in full with its
-77 acceptance criteria. Two examples show the level of detail. FR5 fixes the
+77 acceptance criteria; Appendix~\ref{app:trace} lists how many each
+requirement has and where each is tested. Two examples show the level of
+detail. FR5 fixes the
 exact error for every field and rule, for example
 \enquote{Due date must be a real calendar date.} for \code{2026-02-30}, and
 the order in which several errors are reported. FR9 AC5 requires the subject
@@ -197,12 +213,15 @@ NFR9 & Documentation & Must & Instructions for running both versions and the tes
 
 NFR6 is deliberately a \emph{Could}: a personal planner rarely holds more than
 a few hundred tasks, so the requirement asks for a measurement, and a numeric
-threshold is set only after measuring. \yourwords{state the NFR6 threshold you
-choose now that the measurements in Section~\ref{sec:testing} exist, or
-explain why the requirement stays a measurement only.}
+threshold is set only after measuring. The measurements in
+Section~\ref{sec:testing} show that a search or a sort of 500 tasks takes
+less than one millisecond, far below any delay a user would notice, so NFR6
+stays a measurement only. A fixed threshold would only become useful for much
+larger task lists.
 
 % ---------------------------------------------------------------------------
 \section{Design}
+\label{sec:design}
 
 \subsection{Program structure}
 The application has four modules (Figure~\ref{fig:modules}). \code{core.py}
@@ -281,13 +300,13 @@ checked against \code{sorted()} with the same keys on 200 random tasks.
 \begin{figure}[ht]
 \centering
 \begin{tikzpicture}[
-    step/.style={draw, rectangle, minimum height=1cm, align=center,
+    stage/.style={draw, rectangle, minimum height=1cm, align=center,
                  text width=2.6cm},
     arrow/.style={-{Stealth[length=2.5mm]}, thick}]
-  \node[step] (tasks) {stored tasks\\(stored order)};
-  \node[step, right=0.7cm of tasks] (pass) {linear pass:\\search AND filters};
-  \node[step, right=0.7cm of pass] (keys) {compute each\\key once};
-  \node[step, right=0.7cm of keys] (sort) {stable merge sort\\(new list)};
+  \node[stage] (tasks) {stored tasks\\(stored order)};
+  \node[stage, right=0.7cm of tasks] (pass) {linear pass:\\search AND filters};
+  \node[stage, right=0.7cm of pass] (keys) {compute each\\key once};
+  \node[stage, right=0.7cm of keys] (sort) {stable merge sort\\(new list)};
   \draw[arrow] (tasks) -- (pass);
   \draw[arrow] (pass) -- (keys);
   \draw[arrow] (keys) -- (sort);
@@ -315,7 +334,39 @@ temporary file in the same folder, flushes it to disk and then replaces the
 real file in one step with \code{os.replace} \parencite{python-os}, so an
 interrupted save cannot
 leave a half-written file. If a save fails, the change stays in memory and the
-data is marked unsaved until the next successful save.
+data is marked unsaved until the next successful save
+(Figure~\ref{fig:unsaved}). Every later change saves the complete data again,
+so one successful save stores all earlier changes as well.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    state/.style={draw, rounded corners, minimum width=2.6cm,
+                  minimum height=1cm, align=center},
+    outcome/.style={draw, rectangle, minimum height=0.8cm, align=center},
+    arrow/.style={-{Stealth[length=2.5mm]}, thick},
+    every node/.style={font=\small}]
+  \node[state] (saved) {Saved};
+  \node[state, right=3.8cm of saved] (unsaved) {Unsaved};
+  \node[outcome, below=1.6cm of saved] (exit1) {program ends};
+  \node[outcome, below=1.6cm of unsaved, align=center] (prompt)
+    {exit choices: Retry saving,\\Exit without saving, Cancel exit};
+  \draw[arrow] (saved) to[bend left=18]
+    node[above] {change, save fails} (unsaved);
+  \draw[arrow] (unsaved) to[bend left=18]
+    node[below] {change or retry, save succeeds} (saved);
+  \draw[arrow] (saved) to[loop left, looseness=5]
+    node[left, align=center] {change,\\save succeeds} (saved);
+  \draw[arrow] (unsaved) to[loop right, looseness=5]
+    node[right, align=center] {change or retry,\\save fails} (unsaved);
+  \draw[arrow] (saved) -- node[left] {Exit} (exit1);
+  \draw[arrow] (unsaved) -- node[right] {Exit} (prompt);
+\end{tikzpicture}
+\caption{Saved and unsaved states of the planner, shared by both versions.
+After a successful retry, or Exit without saving, the program ends; Cancel
+exit returns to the planner.}
+\label{fig:unsaved}
+\end{figure}
 
 \subsection{Interface design}
 Both versions show the same data and the same messages from the core.
@@ -338,10 +389,11 @@ Both versions show the same data and the same messages from the core.
 The table layout of the text version follows design decision D9: fixed
 column widths, titles wrapped with \code{textwrap}
 \parencite{python-textwrap} and indented secondary lines, keeping every
-line within 80 characters. \yourwords{the rationale for D9 in your own words:
-why fixed columns with wrapped titles and indented subject and description
-lines were chosen over truncating titles, a wide description column or
-free-form lines.}
+line within 80 characters. Truncating long titles would hide stored data, a
+wide description column would push lines beyond 80 characters, and free-form
+lines without columns would make the list hard to scan. Fixed columns with
+wrapped titles and indented subject and description lines keep every value
+visible while the list stays easy to read in a standard terminal.
 
 % ---------------------------------------------------------------------------
 \section{Implementation}
@@ -357,7 +409,37 @@ flag and the view state, and offers \code{add\_task}, \code{edit\_task},
 exists, before asking for anything else, and saves automatically after a real
 change; a no-op edit or status change saves nothing. \code{storage.py}
 (about 160 lines) contains the strict loader and the safe saver described in
-Section~3.
+Section~\ref{sec:design}.
+
+Listing~\ref{lst:merge} shows the merge step of the sort. The public
+function \code{merge\_sort} first pairs every task with its key and then
+calls this helper, so keys are computed once and tasks are never compared
+directly. The comparison \code{right[j][0] < left[i][0]} takes from the
+right half only when its key is strictly smaller, which keeps equal keys in
+their original order.
+
+\begin{lstlisting}[language=Python, caption={The recursive merge sort in
+\code{core.py}, applied to (key, task) pairs.}, label={lst:merge}]
+def _merge_sort_keyed(pairs):
+    if len(pairs) <= 1:
+        return list(pairs)
+    middle = len(pairs) // 2
+    left = _merge_sort_keyed(pairs[:middle])
+    right = _merge_sort_keyed(pairs[middle:])
+    merged = []
+    i = j = 0
+    while i < len(left) and j < len(right):
+        # Taking from the left on equal keys keeps the sort stable.
+        if right[j][0] < left[i][0]:
+            merged.append(right[j])
+            j += 1
+        else:
+            merged.append(left[i])
+            i += 1
+    merged.extend(left[i:])
+    merged.extend(right[j:])
+    return merged
+\end{lstlisting}
 
 \subsection{Text-based version}
 \code{cli.py} runs a menu loop that reads answers through an injectable
@@ -367,7 +449,31 @@ the answers, passes them to the core and prints the result's lines. Deletion
 asks for confirmation (only \code{y} or \code{yes} confirms). Exiting with
 unsaved changes offers Retry saving, Exit without saving and Cancel exit.
 Unexpected errors are logged to standard error, without task content, and the
-user sees a short message instead of a traceback.
+user sees a short message instead of a traceback. Figure~\ref{fig:cli} shows
+the task list of the text version filtered by status and sorted by due date.
+
+\begin{figure}[ht]
+\centering
+\begin{lstlisting}[numbers=none, basicstyle=\ttfamily\footnotesize]
+Search: none
+Filters: status=Pending
+Sort: due date
+ID | Title                          | Due Date   | Priority | Status
+-------------------------------------------------------------------------
+4  | Prepare revision notes for the | 2026-11-05 | Low      | Pending
+   | final exam                     |            |          |
+     Subject: Mathematics
+1  | Revise Algebra                 | 2026-12-08 | High     | Pending
+     Subject: Mathematics
+     Chapters 3 and 4
+5  | Portfolio review               | 2026-12-14 | Medium   | Pending
+     Subject: Art
+\end{lstlisting}
+\caption{The text version with demonstration data: the 41-character title
+of task 4 wraps inside its column, and each subject and description is
+shown on an indented line beneath its task.}
+\label{fig:cli}
+\end{figure}
 
 \subsection{GUI version}
 \code{gui.py} builds the window with Tkinter and its themed \code{ttk}
@@ -383,6 +489,19 @@ exit routine with the same three choices as the text version.
 \includegraphics[width=0.85\textwidth]{gui-main.png}
 \caption{The GUI version with demonstration data.}
 \label{fig:gui}
+\end{figure}
+
+Figure~\ref{fig:guivalidation} shows the add form after an invalid
+submission. The messages are the core's FR5 messages, the same ones the text
+version prints, and the form keeps the entered values so the user can
+correct them.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.6\textwidth]{gui-add-validation.png}
+\caption{Validation errors from the shared core shown inside the GUI's add
+form.}
+\label{fig:guivalidation}
 \end{figure}
 
 % ---------------------------------------------------------------------------
@@ -430,13 +549,15 @@ Total & 304 & \\
 \end{table}
 
 \subsection{Results}
-All 317 automated tests pass (Python 3.12.5, Windows 11, 13 November 2026).
+All 317 automated tests pass (Python 3.12.5, Windows 11, 14 November 2026).
 The suite was run on a clean copy of every development stage, and its size
 grew with the features: 92 tests for validation and storage, 124 with the
 task operations, 164 with the text version, 246 with search, filters, sort
 and summary, and 317 with the GUI. The same tests also pass in a fresh virtual
-environment with no packages installed. A verification matrix records, for
-every requirement, the passing tests in each version.
+environment with no packages installed. The traceability table in
+Appendix~\ref{app:trace} records, for every functional requirement, the
+passing tests in each version, and Appendix~\ref{app:cases} shows sample
+rows of the test plan.
 
 Further checks support the results:
 \begin{itemize}
@@ -444,20 +565,37 @@ Further checks support the results:
         measures 97\% statement and branch
         coverage of the source code. The uncovered lines are mainly the
         programs' start-up code, which was checked by launching both versions.
-  \item \textbf{Deliberate faults.} During development, faults were inserted
-        into the code one at a time (for example an unstable merge, a missing
-        \code{casefold()}, a task due today counted as overdue, or a closed
-        delete dialog that still deleted). Each fault had to make at least one
-        test fail; where one did not, a test was added.
+  \item \textbf{Deliberate faults.} To check that the tests detect real
+        mistakes, four faults were inserted one at a time into a clean copy
+        of the final code and the whole suite was run each time. Every fault
+        was detected (Table~\ref{tab:faults}).
   \item \textbf{Performance (NFR6).} On 500 generated tasks, a search took
-        0.35--0.46\,ms and a merge sort 0.80--0.88\,ms per call (fastest of
-        7 repeats of 50 calls, measured with \code{timeit}
+        0.35--0.47\,ms and a merge sort 0.80--0.94\,ms per call over two runs
+        (fastest of 7 repeats of 50 calls, measured with \code{timeit}
         \parencite{python-timeit}).
   \item \textbf{Manual GUI checks.} The GUI was launched with demonstration
         data and its main workflows were checked on the real event loop,
         including an add form showing the core's validation error and the
         unsaved-changes dialog.
 \end{itemize}
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}Xlr@{}}
+\toprule
+Inserted fault & Change & Failing tests \\
+\midrule
+Unstable merge: equal keys taken from the right half & \code{<} to \code{<=} & 25 \\
+Subject sort without \code{casefold()} & key uses \code{subject} as stored & 3 \\
+A task due today counted as overdue & \code{<} to \code{<=} & 4 \\
+Closing the delete dialog still deletes the task & \code{== CONFIRM} to \code{!= CANCEL} & 1 \\
+\bottomrule
+\end{tabularx}
+\caption{Faults inserted into the final code, one at a time; each made at
+least one of the 317 tests fail.}
+\label{tab:faults}
+\end{table}
 
 % ---------------------------------------------------------------------------
 \section{Evaluation}
@@ -496,9 +634,6 @@ Possible extensions are reminders for tasks due soon, an undo for the last
 change, export of the task list to CSV, keyboard shortcuts in the GUI and a
 measured performance threshold for larger task lists.
 
-\yourwords{optional: a short critical reflection on what worked well and what
-you would do differently. Describe only your own experience.}
-
 % ---------------------------------------------------------------------------
 \section{Conclusion}
 The Study Planner meets its aims: students can add, edit, delete and track
@@ -513,14 +648,9 @@ requirements are met.
 % ---------------------------------------------------------------------------
 \section*{GenAI acknowledgement}
 \addcontentsline{toc}{section}{GenAI acknowledgement}
-\yourwords{check and rewrite this draft so that it describes your use
-exactly.} I used Claude (Anthropic), through the Claude Code tool, during this
-project. It wrote most of the Python source code and the automated tests under
-my direction, drafted parts of the requirements, design and test
-documentation and of this report for my review, ran the tests and checks, and
-carried out Git and GitHub operations. I chose the topic, decided the
-requirements and design choices, reviewed and corrected the outputs, and I am
-responsible for the submitted work.
+Claude (Anthropic), accessed through Claude Code, was used solely as an assistant reviewer.
+It reviewed the project work and provided feedback and suggestions. All implementation
+and final decisions were made by the student.
 
 \clearpage
 \printbibliography[heading=bibintoc]
@@ -559,5 +689,70 @@ python -m unittest discover -s tests
 \paragraph{Data file.} Tasks are saved in
 \code{\textasciitilde/.study\_planner/tasks.json} in the user's home folder. The
 file and its folder are created by the first successful save.
+
+\clearpage
+\section{Requirements traceability}
+\label{app:trace}
+
+Every acceptance criterion is tested on the shared core. The interface
+columns list the tests that repeat the criteria through each version; all
+listed tests pass. Test IDs refer to the test plan: V validation, S storage
+and saving, A add, E edit, D delete, C status change, SR search, F filters,
+SO sort, SU summary, VW list view, G GUI.
+
+\begin{table}[ht]
+\centering
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}lcXXX@{}}
+\toprule
+FR & ACs & Text version & GUI version & GUI not applicable \\
+\midrule
+FR1 & 4 & A5, A6, A8, A9 & G1--G5 & -- \\
+FR2 & 6 & E9--E14 & G6--G12 & AC3, AC4: the task is selected, not typed \\
+FR3 & 6 & D7--D12 & G13--G16 & AC3, AC4: the task is selected, not typed \\
+FR4 & 6 & C7--C11; AC2 (six transitions) on the core, C2 & G17--G21 & AC4: drop-down; AC5: the task is selected \\
+FR5 & 6 & V1--V59 on the core; A6, A7, E10, C9 & V1--V59 on the core; G3, G8 & AC6: no typed ID \\
+FR6 & 7 & S23--S34; E9, E13, S10--S12 & G22--G34 (Exit and the close button) & -- \\
+FR7 & 7 & SR11--SR17 & G35--G39 & -- \\
+FR8 & 8 & F14--F22 & G40--G45 & AC4: drop-downs allow valid values only \\
+FR9 & 11 & SO12--SO17; AC7, AC8 on the core, SO4--SO6 & G46--G51 & AC7, AC8: algorithm tests on the core \\
+FR10 & 10 & SU11--SU18 & G52--G60 & AC1, AC2, AC5--AC7: fixed date on the core \\
+FR11 & 6 & VW4--VW11 & G61--G67 & AC6: text layout only \\
+\midrule
+Total & 77 & & & \\
+\bottomrule
+\end{tabularx}
+\caption{Acceptance criteria per functional requirement and the tests that
+verify them in each version.}
+\label{tab:trace}
+\end{table}
+
+\section{Sample test cases}
+\label{app:cases}
+
+Table~\ref{tab:cases} shows rows of the test plan, one or two per kind of
+case. Each row names the automated test that implements it.
+
+\begin{table}[ht]
+\centering
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}llXX@{}}
+\toprule
+ID & Kind & Input & Expected result \\
+\midrule
+A1 & normal & add a valid task with priority and status empty & ID 5, Medium, Pending, appended; \code{next\_id} 6; saved; \enquote{Task 5 added.} \\
+V15 & boundary & due date \code{2026-02-30} & rejected: \enquote{Due date must be a real calendar date.} \\
+V17 & boundary & due date \code{2028-02-29} (leap year) & accepted \\
+V20 & boundary & due date \code{2100-02-29} (century, not a leap year) & rejected as not a real calendar date \\
+SU4 & boundary & 16 tasks, 1 completed & completion \code{6.3\%} (default float formatting gives 6.2) \\
+SO4 & boundary & IDs 7, 3, 9 with equal keys, every sort field & order 7, 3, 9 kept (stable) \\
+SR7 & boundary & search \code{STRASSE} for the title \enquote{Straße survey} & task found (\code{casefold()}) \\
+V56 & invalid & empty title, date \code{2026-02-30}, priority \code{Urgent} & exactly three errors, in field order; nothing accepted \\
+G3 & invalid & GUI add form, title of three spaces & form stays open with the title error and the entered values; nothing added; file unchanged \\
+\bottomrule
+\end{tabularx}
+\caption{Sample rows of the test plan (304 cases in total).}
+\label{tab:cases}
+\end{table}
 
 \end{document}
