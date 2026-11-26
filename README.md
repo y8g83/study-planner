@@ -8,15 +8,16 @@ implements business rules itself.
 
 ## Current status
 
-| Component | Status |
-|---|---|
+
+| Component                                                         | Status                 |
+| ----------------------------------------------------------------- | ---------------------- |
 | Task operations: add, edit, delete, change status (`src/core.py`) | Implemented and tested |
-| Task list view (`src/core.py`) | Implemented and tested |
-| Input validation (`src/core.py`) | Implemented and tested |
+| Task list view (`src/core.py`)                                    | Implemented and tested |
+| Input validation (`src/core.py`)                                  | Implemented and tested |
 | JSON persistence (`src/storage.py`, coordinated by `src/core.py`) | Implemented and tested |
-| Search, filters, merge sort and summary (`src/core.py`) | Implemented and tested |
-| Text-based interface (`src/cli.py`) | Implemented and tested |
-| Tkinter interface (`src/gui.py`) | Implemented and tested |
+| Search, filters, merge sort and summary (`src/core.py`)           | Implemented and tested |
+| Text-based interface (`src/cli.py`)                               | Implemented and tested |
+| Tkinter interface (`src/gui.py`)                                  | Implemented and tested |
 
 ## Screenshots
 
@@ -244,13 +245,14 @@ No `PYTHONPATH` setting is required: `tests/helpers.py` adds `src/` to the
 import path. Tests that use a data file create it in a temporary directory
 and never read or write the real data file.
 
-| Test module | Covers |
-|---|---|
-| `tests/test_validation.py` | Input validation and message texts |
-| `tests/test_storage.py` | Loading, saving and the unsaved state |
-| `tests/test_core.py` | Task operations, search, filters, merge sort, summary, the list view and messages |
-| `tests/test_cli.py` | The text-based interface, with scripted input |
-| `tests/test_gui.py` | The GUI on a hidden Tk window; skipped when no display is available |
+
+| Test module                | Covers                                                                            |
+| -------------------------- | --------------------------------------------------------------------------------- |
+| `tests/test_validation.py` | Input validation and message texts                                                |
+| `tests/test_storage.py`    | Loading, saving and the unsaved state                                             |
+| `tests/test_core.py`       | Task operations, search, filters, merge sort, summary, the list view and messages |
+| `tests/test_cli.py`        | The text-based interface, with scripted input                                     |
+| `tests/test_gui.py`        | The GUI on a hidden Tk window; skipped when no display is available               |
 
 ### Test coverage
 
@@ -265,13 +267,14 @@ python -m coverage report -m
 
 Measured on 14 November 2026 (317 tests, statement and branch coverage):
 
-| Module | Coverage |
-|---|---|
-| `src/cli.py` | 98% |
-| `src/core.py` | 99% |
-| `src/gui.py` | 92% |
-| `src/storage.py` | 99% |
-| **Total** | **97%** |
+
+| Module           | Coverage |
+| ---------------- | -------- |
+| `src/cli.py`     | 98%      |
+| `src/core.py`    | 99%      |
+| `src/gui.py`     | 92%      |
+| `src/storage.py` | 99%      |
+| **Total**        | **97%**  |
 
 The lines not covered are mainly the two programs' start-up code
 (`main()` and the `__main__` blocks), the modal wait of the GUI's choice
@@ -302,14 +305,15 @@ python scripts/measure_performance.py
 Measured on 14 November 2026 (Python 3.12.5, Windows 11, Intel 64-bit
 processor); each figure is the fastest of 7 repeats of 50 calls:
 
-| Operation | Time per call (ms) |
-|---|---|
-| Search, matching query (`algebra`) | 0.46 |
-| Search, no match (`zzz`) | 0.35 |
-| Merge sort by due date | 0.81 |
-| Merge sort by priority | 0.82 |
-| Merge sort by status | 0.80 |
-| Merge sort by subject | 0.88 |
+
+| Operation                          | Time per call (ms) |
+| ---------------------------------- | ------------------ |
+| Search, matching query (`algebra`) | 0.46               |
+| Search, no match (`zzz`)           | 0.35               |
+| Merge sort by due date             | 0.81               |
+| Merge sort by priority             | 0.82               |
+| Merge sort by status               | 0.80               |
+| Merge sort by subject              | 0.88               |
 
 Search is a linear scan of the task list; the merge sort makes
 O(n log n) comparisons and uses O(n) extra space.
@@ -317,6 +321,7 @@ O(n log n) comparisons and uses O(n) extra space.
 ## Project structure
 
 ```
+
 study-planner/
 ├── src/
 │   ├── core.py          Shared core: task operations, validation, search,
@@ -339,3 +344,17 @@ study-planner/
 │   └── references.bib
 └── docs/screenshots/    Screenshots used in this README
 ```
+
+## GenAI acknowledgemet
+
+AI acknowledgement : I acknowledge the use of Claude (Anthropic).
+
+Claude code, was used solely to review studnet-written project.
+
+work and provide feedback and suggestions.
+
+No code or project content was generated by GenAI.
+
+All coding, Implementation, and development were completed.
+
+independently by the student.
