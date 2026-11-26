@@ -12,6 +12,10 @@ __pycache__/
 *.run.xml
 *.toc
 
+# Report title-page details (name and student number stay private).
+report/student-details.tex
+*.pdf
+
 # Virtual environments.
 .venv/
 venv/
